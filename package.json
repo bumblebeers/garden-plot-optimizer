@@ -1,0 +1,10 @@
+{
+  "name": "palia-garden",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Palia Garden Optimizer — shared logic, type checker, simulator, and verification harness.",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "verify": "node tools/verify-optimizer.js"
+  }
+}

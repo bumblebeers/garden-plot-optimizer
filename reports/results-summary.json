@@ -1,0 +1,146 @@
+[
+  {
+    "name": "5 carrots (no fert)",
+    "objective": "income",
+    "claimed": 3366.766666666667,
+    "score": 3976.1000000000004,
+    "simMatch": true,
+    "valid": true,
+    "random": {
+      "n": 400,
+      "mean": 2523.6245659722226,
+      "sd": 129.59255532451104,
+      "min": 2139.1951388888892,
+      "max": 2861.574305555556
+    },
+    "above": 0,
+    "pct": "100.0",
+    "invalid": 0
+  },
+  {
+    "name": "5 carrots (default fert)",
+    "objective": "income",
+    "claimed": 3701.9791666666656,
+    "score": 4285.979166666665,
+    "simMatch": true,
+    "valid": true,
+    "random": {
+      "n": 400,
+      "mean": 2844.394013888888,
+      "sd": 116.19566266553485,
+      "min": 2544.802083333333,
+      "max": 3137.6388888888887
+    },
+    "above": 0,
+    "pct": "100.0",
+    "invalid": 0
+  },
+  {
+    "name": "apple + 2 beans + pumpkin",
+    "objective": "income",
+    "claimed": 3648.7812499999986,
+    "score": 4095.1145833333317,
+    "simMatch": true,
+    "valid": true,
+    "random": {
+      "n": 400,
+      "mean": 2935.514392361109,
+      "sd": 102.00346171591424,
+      "min": 2605.6138888888886,
+      "max": 3198.6055555555554
+    },
+    "above": 0,
+    "pct": "100.0",
+    "invalid": 0
+  },
+  {
+    "name": "4 blueberries + 4 peppers",
+    "objective": "income",
+    "claimed": 3572.619444444443,
+    "score": 3997.2861111111097,
+    "simMatch": true,
+    "valid": true,
+    "random": {
+      "n": 400,
+      "mean": 2903.02054861111,
+      "sd": 100.15468802655191,
+      "min": 2607.680555555555,
+      "max": 3133.329861111111
+    },
+    "above": 0,
+    "pct": "100.0",
+    "invalid": 0
+  },
+  {
+    "name": "prefer big 2x2 (blueberry/pepper)",
+    "objective": "income",
+    "claimed": 3522.489583333333,
+    "score": 3859.1562499999995,
+    "simMatch": true,
+    "valid": true,
+    "random": {
+      "n": 400,
+      "mean": 2886.9136041666648,
+      "sd": 99.60463261325621,
+      "min": 2626.4729166666657,
+      "max": 3172.6520833333325
+    },
+    "above": 0,
+    "pct": "100.0",
+    "invalid": 0
+  },
+  {
+    "name": "custom buff order (income)",
+    "objective": "income",
+    "claimed": 3605.8062499999983,
+    "score": 4262.806249999998,
+    "simMatch": true,
+    "valid": true,
+    "random": {
+      "n": 400,
+      "mean": 2809.2256857638886,
+      "sd": 86.81948737446041,
+      "min": 2513.5180555555557,
+      "max": 3082.7291666666665
+    },
+    "above": 0,
+    "pct": "100.0",
+    "invalid": 0
+  },
+  {
+    "name": "no fertilizer allowed",
+    "objective": "income",
+    "claimed": 3291.0687500000004,
+    "score": 3884.4020833333334,
+    "simMatch": true,
+    "valid": true,
+    "random": {
+      "n": 400,
+      "mean": 2691.972520833334,
+      "sd": 90.97325173879426,
+      "min": 2418.113194444444,
+      "max": 2934.0291666666667
+    },
+    "above": 0,
+    "pct": "100.0",
+    "invalid": 0
+  },
+  {
+    "name": "yield objective - max crops per day",
+    "objective": "yield",
+    "claimed": 76.05000000000001,
+    "score": 85.35666666666668,
+    "simMatch": true,
+    "valid": true,
+    "random": {
+      "n": 400,
+      "mean": 59.637875,
+      "sd": 2.7512968277477827,
+      "min": 50.85000000000001,
+      "max": 67.90000000000002
+    },
+    "above": 0,
+    "pct": "100.0",
+    "invalid": 0
+  }
+]
