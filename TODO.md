@@ -34,9 +34,11 @@ loads the layout into the grid and the crop-selection menu, including a
 *partially finished* plot.
 
 - `decodeAisen(code)` in `src/garden.js` parses an Aisen v0.5 save code back into
-  our 9×9 grid (crops + fertilizer grid + level / star-seed settings). It is the
-  inverse of `encodeAisen` and the mirror of Aisen's own `expandPlotCode` +
-  `GardenGridBasic.placeCrop`.
+  our 9×9 grid + level / star-seed settings. It is the inverse of `encodeAisen`
+  and the mirror of Aisen's own `expandPlotCode` + `GardenGridBasic.placeCrop`.
+  Aisen's per-tile fertilizer is parsed but not carried into the app — the grid
+  stores only crop symbols and re-derives the assignment in `analyzeLayout` on
+  the next Optimize.
 - Handles Aisen's **trimmed** dimensions (`D-WxH` smaller than 9×9, from
   `trimGarden`) and partially filled plots (empty tiles stay empty). A
   partially finished plot is accepted through `validateLayout` as the gate.

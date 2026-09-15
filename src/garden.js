@@ -662,10 +662,10 @@
    *
    * A "partially finished" plot is one with empty ('N') tiles — the 9x9 grid is
    * left with null cells there, which validateLayout and the app both accept.
-   * Returns { grid, fertGrid, level, starSeeds }.
+   * Returns { grid, level, starSeeds }. The per-tile fertilizer Aisen carries is
+   * parsed but not returned: the app stores only crop symbols and re-derives the
+   * fertilizer assignment in analyzeLayout on the next Optimize.
    */
-  const AISEN_FERT_REV = { H: 'H', Q: 'Q', Y: 'W', W: 'N' };
-
   /* Run-length decode a plot's compressed tile string (Aisen's expandPlotCode). */
   function expandPlotCode(code) {
     const tokens = code.match(/[A-Z][a-z]*(?:\.[A-Z][a-z]*)?\d*/g) || [];
@@ -700,7 +700,6 @@
     if (plots[0] !== 'CR') throw new Error('Invalid Aisen crop section');
     const rev = Object.fromEntries(Object.entries(AISEN_CROP).map(([s, c]) => [c, s]));
     const grid = Array.from({ length: 9 }, () => Array(9).fill(null));
-    const fertGrid = Array.from({ length: 9 }, () => Array(9).fill(null));
     const filled = new Set();
     for (const p of plots.slice(1)) {
       const m = p.match(/^(\d+)x(\d+)(.*)$/);
@@ -713,10 +712,15 @@
         const r = py + Math.floor(i / 3), c = px + (i % 3);
         if (r >= 9 || c >= 9) throw new Error(`Aisen tile at ${r},${c} is out of bounds`);
         const key = r * 9 + c;
-        if (filled.has(key)) continue;
         const tm = tiles[i].match(/^([A-Z][a-z]*)(?:\.([A-Z][a-z]*))?$/);
         if (!tm) throw new Error(`Invalid Aisen tile '${tiles[i]}'`);
-        const cropCode = tm[1], fertCode = tm[2] || null;
+        const cropCode = tm[1];
+        if (filled.has(key)) {
+          // An already-filled tile must be an empty 'N' (the rest of a crop's
+          // footprint); a crop code here would be a superimposition.
+          if (cropCode !== 'N') throw new Error(`Overlapping crops at ${r},${c}`);
+          continue;
+        }
         if (cropCode === 'N') { filled.add(key); continue; }
         const sym = rev[cropCode];
         if (!sym) throw new Error(`Unknown Aisen crop code '${cropCode}'`);
@@ -728,14 +732,13 @@
           grid[rr][cc] = sym;
           filled.add(rr * 9 + cc);
         }
-        if (fertCode) fertGrid[r][c] = AISEN_FERT_REV[fertCode] || fertCode;
       }
     }
     // settings: L<level> (gardening level), Nss (star seeds OFF; Aisen defaults ON)
     const levelMatch = settings.match(/L(\d+)/);
     const level = levelMatch ? +levelMatch[1] : null;
     const starSeeds = !settings.includes('Nss');
-    return { grid, fertGrid, level, starSeeds };
+    return { grid, level, starSeeds };
   }
 
   return {
@@ -748,6 +751,6 @@
     getAnchors, hillfill, optimizeSynergy,
     harvestSchedule, cycleText, simulate,
     encodeAisen, AISEN_CROP, AISEN_FERT,
-    decodeAisen, expandPlotCode, AISEN_FERT_REV,
+    decodeAisen, expandPlotCode,
   };
 });

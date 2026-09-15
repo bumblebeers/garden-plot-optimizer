@@ -49,7 +49,12 @@ coverage, and **Yield per day** broken down per crop.
 (`https://palia-garden-planner.vercel.app/?layout=<code>`) and loads the layout
 into both the grid and the crop-selection menu — including a *partially finished*
 plot (empty tiles stay empty; Aisen's trimmed `D-WxH` dimensions are handled).
-The imported gardening level and star-seed setting are applied to Preferences.
+The imported gardening level and star-seed setting are applied to Preferences
+when the code carries them. **Fertilizer is not restored** — the grid stores only
+crop symbols, and the per-crop assignment is re-derived in `analyzeLayout` on the
+next Optimize. A code with settings but no `Nss` (no-star-seeds) flips the
+star-seed toggle ON (Aisen's default), faithful to the shared layout; a code with
+no settings leaves the recipient's Preferences untouched.
 
 **Pin crops.** A **Pin mode** toggle (or the 📌 button in a tile's detail card)
 locks a crop at its exact position. When you then hit **Optimize**, pinned crops
@@ -87,8 +92,10 @@ The tests exercise exactly what the app computes:
   output with a faithful replica of Aisen's own `expandPlotCode`/plot loader.
 - **`decodeAisen(code)`** — the inverse codec, for the **Import** field: parses
   an Aisen v0.5 save code (including a partial / trimmed `D-WxH` plot) back into
-  our 9×9 grid, fertilizer grid, and the level / star-seed settings. Tests in
-  `test/import.test.js` pin it against hand-written codes and round-trips.
+  our 9×9 grid and the level / star-seed settings. The per-tile fertilizer Aisen
+  carries is parsed but not returned (the app re-derives it in `analyzeLayout`).
+  Tests in `test/import.test.js` pin it against hand-written codes and
+  round-trips.
 - `CROP` / `SYMS` / etc. — crop data and the yield model (a single source of
   truth for both app and tests).
 

@@ -62,12 +62,22 @@ test('decodeAisen parses settings: level and star seeds', () => {
   assert.strictEqual(d2.starSeeds, true);
 });
 
-test('decodeAisen maps fertilizer codes back to our buffs', () => {
-  // a tomato at (0,6) with HydratePro (Aisen 'Y' == our Water Retain 'W')
+test('decodeAisen decodes a crop with a fertilizer suffix (fert is not returned)', () => {
+  // a tomato at (0,6) with HydratePro (Aisen 'Y'); the crop decodes, fert is not
+  // carried into the app (it re-derives the assignment on Optimize).
   const code = PARTIAL_CODE.replace('6x0TN8', '6x0T.YN8');
-  const { grid, fertGrid } = decodeAisen(code);
+  const { grid } = decodeAisen(code);
   assert.strictEqual(grid[0][6], 'T');
-  assert.strictEqual(fertGrid[0][6], 'W', "Aisen 'Y' (HydratePro) maps to our Water Retain 'W'");
+  // the codec returns only the layout + settings
+  assert.deepStrictEqual(Object.keys(decodeAisen(code)).sort(), ['grid', 'level', 'starSeeds']);
+});
+
+test('decodeAisen throws on an overlapping crop code (start tile inside a footprint)', () => {
+  // A 3x3 apple at (0,0) fills the whole plot; a crop code on a later tile sits
+  // inside its footprint (a superimposition), which must throw, not silently skip.
+  const code = '0.5_D-9x9_CR-' +
+    ['0x0ATN7', '3x0N9', '6x0N9', '0x3N9', '3x3N9', '6x3N9', '0x6N9', '3x6N9', '6x6N9'].join('-');
+  assert.throws(() => decodeAisen(code), /Overlapping crops at 0,1/);
 });
 
 test('decodeAisen handles a crop whose footprint spans plot boundaries', () => {
