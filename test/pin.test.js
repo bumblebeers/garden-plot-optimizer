@@ -7,8 +7,19 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const {
-  validateLayout, optimizeSynergy, buildGrid, makeOpts, CROP, SYMS,
+  validateLayout, optimizeSynergy, buildGrid, buildInstances, fillInitial,
+  hillfill, makeOpts, CROP, SYMS, FILL, PROVIDERS,
 } = require('../src/garden.js');
+
+// seeded PRNG so a stochastic search test is deterministic
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 // check that a full crop footprint of `sym` sits at anchor (r,c)
 function instanceAt(grid, sym, r, c) {
@@ -112,4 +123,55 @@ test('buildGrid returns null when a pin cannot fit (overlap or out of bounds)', 
   // a pin that extends past the plot edge
   const g2 = buildGrid(sel, [{ sym: 'A', r: 7, c: 7 }]);
   assert.strictEqual(g2, null, 'out-of-bounds pin is rejected');
+});
+
+test('buildGrid marks only pinned cells as immutable in the user mask', () => {
+  // issue #8: previously the whole selection was frozen in `user`; only pins may be.
+  const sel = { B: 3, S: 3 };
+  const pins = [{ sym: 'B', r: 0, c: 0 }];
+  const { grid, user } = buildGrid(sel, pins);
+  assert.ok(grid);
+  assert.ok(instanceAt(grid, 'B', 0, 0), 'pinned blueberry placed at (0,0)');
+  let userCount = 0;
+  for (let k = 0; k < 81; k++) if (user[k]) userCount++;
+  assert.strictEqual(userCount, 4, 'exactly the 2x2 pinned crop is immutable');
+});
+
+// cells (indices) occupied by each 1x1 symbol, sorted
+function cellsBySym(grid) {
+  const m = {};
+  for (const it of buildInstances(grid)) {
+    if (it.cells.length !== 1) continue;
+    (m[it.sym] = m[it.sym] || []).push(it.cells[0]);
+  }
+  for (const s in m) m[s].sort((a, b) => a - b);
+  return m;
+}
+
+test('hillfill relocates unpinned selected crops while preserving the selection (issue #8)', () => {
+  // A selection of 1x1 crops plus autofill, no pins. The hill-climb must be able
+  // to move the selected crops (their cells change) yet keep their counts —
+  // before #8 they were frozen because buildGrid marked every placed cell.
+  const sel = { T: 6, n: 6, t: 6 };
+  const opts = makeOpts();
+  const realRandom = Math.random;
+  Math.random = mulberry32(7); // seed the whole pipeline: placement + search
+  try {
+    const { grid, user } = buildGrid(sel, []);
+    const f1 = FILL.filter(s => !(s in sel));
+    const g = fillInitial(grid, f1, PROVIDERS);
+    const locked = new Set(Object.keys(sel));
+    const before = cellsBySym(g);
+    const [bg] = hillfill(g, user, 2000, f1, PROVIDERS, opts, locked);
+    assert.ok(bg);
+    assert.strictEqual(validateLayout(bg).valid, true, 'hill-climb keeps a valid packing');
+    const after = cellsBySym(bg);
+    for (const sym of Object.keys(sel)) {
+      assert.strictEqual(after[sym].length, sel[sym], `${sym} count preserved`);
+    }
+    const moved = Object.keys(sel).some(sym => JSON.stringify(before[sym]) !== JSON.stringify(after[sym]));
+    assert.ok(moved, 'at least one selected crop moved during the hill-climb');
+  } finally {
+    Math.random = realRandom;
+  }
 });

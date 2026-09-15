@@ -548,8 +548,9 @@
     return Object.values(cnt).filter(x => x >= need).length;
   }
   /* Build a 9x9 grid for a selection, placing any pinned crops first at their
-   * exact anchors. Pinned cells are marked in `user` so the fill/hill-climb
-   * never moves them. `pins` is an array of { sym, r, c } anchors (top-left
+   * exact anchors. Only pinned cells are marked in `user` (immutable): the
+   * remaining selection is free to move in the hill-climb, subject to the
+   * selection multiset. `pins` is an array of { sym, r, c } anchors (top-left
    * tile of each pinned crop); it is optional. `policy` picks how each crop's
    * position is chosen when several fit:
    *   'buff'     (default) the placement that satisfies the most neighbour buffs,
@@ -598,15 +599,10 @@
         if (policy === 'firstfit') p = cands[0];                                        // row-major: top-left-most
         else if (policy === 'random') p = cands[Math.floor(Math.random() * cands.length)];
         else { const top = cands.filter(x => x[2] === mx); p = top[Math.floor(Math.random() * top.length)]; }
-        for (let dr = 0; dr < h; dr++) for (let dc = 0; dc < w; dc++) { grid[p[0] + dr][p[1] + dc] = sym; user[(p[0] + dr) * 9 + p[1] + dc] = true; }
+        for (let dr = 0; dr < h; dr++) for (let dc = 0; dc < w; dc++) grid[p[0] + dr][p[1] + dc] = sym;
       }
     }
     return { grid, user };
-  }
-  function cropOverlapsUser(sym, r, c, user) {
-    const h = CROP[sym].sz[0], w = CROP[sym].sz[1];
-    for (let dr = 0; dr < h; dr++) for (let dc = 0; dc < w; dc++) if (user[(r + dr) * 9 + c + dc]) return true;
-    return false;
   }
   function fillInitial(grid, f1, f2) {
     grid = grid.map(r => r.slice());
@@ -629,65 +625,131 @@
     for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (grid[r][c] == null) { grid[r][c] = order[i % order.length]; i++; }
     return grid;
   }
-  function getAnchors(grid) {
-    const a = [], cov = new Set();
-    for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
-      if (cov.has(r * 9 + c) || grid[r][c] == null) continue;
-      const sym = grid[r][c], h = CROP[sym].sz[0], w = CROP[sym].sz[1];
-      if (h === 1 && w === 1) continue;
-      if (r > 0 && grid[r - 1][c] === sym) continue;
-      if (c > 0 && grid[r][c - 1] === sym) continue;
-      a.push([sym, r, c]);
-      for (let dr = 0; dr < h; dr++) for (let dc = 0; dc < w; dc++) cov.add((r + dr) * 9 + c + dc);
+  /* One random move applied to `g2` in place; returns true if a move was made.
+   * The move space always keeps the layout a valid packing and, when `lock` is
+   * non-empty, preserves the instance count of every locked symbol — the user's
+   * selection acts as a bill of materials (relocatable, never deletable), while
+   * autofill material (f1 1x1s / f2 providers) is free. Pinned cells (`user`)
+   * never move. */
+  function hillMove(g2, user, f1, f2, lock) {
+    const insts = buildInstances(g2);
+    const instByCell = new Map();
+    insts.forEach((it, i) => it.cells.forEach(k => instByCell.set(k, i)));
+    const one = [];
+    for (let k = 0; k < 81; k++) {
+      if (user[k] || g2[Math.floor(k / 9)][k % 9] == null) continue;
+      if (insts[instByCell.get(k)].cells.length === 1) one.push(k);
     }
-    return a;
+    const selInsts = insts.filter(it => it.cells.length > 1 && lock.has(it.sym) && !it.cells.some(x => user[x]));
+    // move shares: swap/retype .40, convert .20, break .15, relocate .25 — the
+    // relocate slice is renormalised away when there is no selected multi-cell
+    // crop to move, so a fixed budget is not wasted on it
+    const wSwap = 0.40, wConv = 0.20, wBreak = 0.15, wReloc = 0.25;
+    const tot = selInsts.length ? wSwap + wConv + wBreak + wReloc : wSwap + wConv + wBreak;
+    const r = Math.random() * tot;
+    if (r < wSwap) { // swap two 1x1 cells (any symbols — preserves counts), or retype an autofill 1x1
+      if (one.length < 2) return false;
+      const a = one[Math.floor(Math.random() * one.length)];
+      const ar = Math.floor(a / 9), ac = a % 9, asym = g2[ar][ac];
+      if (f1.includes(asym) && Math.random() < 0.5) {
+        const ns = f1[Math.floor(Math.random() * f1.length)];
+        if (ns === asym) return false;
+        g2[ar][ac] = ns;
+      } else {
+        const b = one[Math.floor(Math.random() * one.length)];
+        if (b === a) return false;
+        const br = Math.floor(b / 9), bc = b % 9;
+        const t = g2[ar][ac]; g2[ar][ac] = g2[br][bc]; g2[br][bc] = t;
+      }
+      return true;
+    }
+    if (r < wSwap + wConv) { // convert a 2x2 all-autofill block into a provider
+      const spots = [];
+      for (let rr = 0; rr < 8; rr++) for (let cc = 0; cc < 8; cc++) {
+        const k0 = rr * 9 + cc, ks = [k0, k0 + 1, k0 + 9, k0 + 10];
+        if (ks.some(x => user[x])) continue;
+        if (ks.every(x => f1.includes(g2[Math.floor(x / 9)][x % 9]))) spots.push([rr, cc]);
+      }
+      if (!spots.length || !f2.length) return false;
+      const [rr, cc] = spots[Math.floor(Math.random() * spots.length)];
+      const sym = f2[Math.floor(Math.random() * f2.length)];
+      for (let dr = 0; dr < 2; dr++) for (let dc = 0; dc < 2; dc++) g2[rr + dr][cc + dc] = sym;
+      return true;
+    }
+    if (r < wSwap + wConv + wBreak) { // break a provider back into 1x1s
+      const provs = insts.filter(it => it.cells.length === 4 && f2.includes(it.sym) && !it.cells.some(x => user[x]));
+      if (!provs.length) return false;
+      const it = provs[Math.floor(Math.random() * provs.length)];
+      for (const x of it.cells) g2[Math.floor(x / 9)][x % 9] = f1[Math.floor(Math.random() * f1.length)];
+      return true;
+    }
+    // Relocate a selected multi-cell crop: drop it, fill its old footprint with
+    // autofill 1x1s, and place it over an all-autofill block of the same size.
+    const it = selInsts[Math.floor(Math.random() * selInsts.length)];
+    const h = CROP[it.sym].sz[0], w = CROP[it.sym].sz[1];
+    const own = new Set(it.cells);
+    const targets = [];
+    for (let rr = 0; rr <= 9 - h; rr++) for (let cc = 0; cc <= 9 - w; cc++) {
+      const cells = [];
+      for (let dr = 0; dr < h; dr++) for (let dc = 0; dc < w; dc++) cells.push((rr + dr) * 9 + cc + dc);
+      if (cells.some(x => user[x] || own.has(x))) continue;
+      // every cell must belong to autofill material: a 1x1 autofill crop, or a
+      // single multi-cell autofill crop that exactly covers the block
+      const ids = new Set(cells.map(x => instByCell.get(x)));
+      let ok = true;
+      for (const id of ids) {
+        const ci = insts[id];
+        if (ci.cells.length === 1 && !lock.has(ci.sym)) continue;
+        if (ids.size === 1 && ci.cells.length === h * w && !lock.has(ci.sym) && ci.cells.every(x => cells.includes(x))) continue;
+        ok = false; break;
+      }
+      if (ok) targets.push([rr, cc]);
+    }
+    if (!targets.length) return false;
+    const [tr, tc] = targets[Math.floor(Math.random() * targets.length)];
+    for (const x of it.cells) g2[Math.floor(x / 9)][x % 9] = f1[Math.floor(Math.random() * f1.length)];
+    for (let dr = 0; dr < h; dr++) for (let dc = 0; dc < w; dc++) g2[tr + dr][tc + dc] = it.sym;
+    return true;
   }
-  function hillfill(grid, user, iters, f1, f2, opts) {
+  /* Simulated-annealing hill-climb over the full move space. `user` marks
+   * pinned (immutable) cells; `lock` is the set of symbols whose instance
+   * counts must be preserved (the user's selection). Acceptance is Metropolis
+   * with geometric cooling: the search escapes local optima early and refines
+   * late, instead of freezing at the first local optimum a greedy climb
+   * reaches (the bug #9 reports: the old hill-climb never converged on its own
+   * score function, and a plain anneal over the same moves beat it). */
+  function hillfill(grid, user, iters, f1, f2, opts, lock) {
+    const lockSyms = lock || new Set();
     grid = grid.map(r => r.slice());
     let cur = scoreTotal(grid, opts), best = cur, bg = grid.map(r => r.slice());
+    // start warm enough to take moderate steps, cool to near-greedy
+    const T0 = Math.max(1e-6, 0.01 * cur);
+    const Tmin = 1e-3;
+    // T0=0.01·score (colder than 0.02) measured best: it keeps the search near
+    // greedy while still escaping local optima, and wins on every scenario
+    // tried for both objectives (see issue #8/#9 verification runs).
+    const cool = Math.pow(Tmin / T0, 1 / Math.max(1, iters));
+    let T = T0;
     for (let it = 0; it < iters; it++) {
       const g2 = grid.map(r => r.slice());
-      const move = Math.random();
-      if (move < 0.4) {
-        const cells = [];
-        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (f1.includes(g2[r][c]) && !user[r * 9 + c]) cells.push([r, c]);
-        if (!cells.length) continue;
-        const [r, c] = cells[Math.floor(Math.random() * cells.length)];
-        const cs = g2[r][c];
-        if (Math.random() < 0.5) {
-          const ns = f1[Math.floor(Math.random() * f1.length)];
-          if (ns === cs) continue;
-          g2[r][c] = ns;
-        } else {
-          const [r2, c2] = cells[Math.floor(Math.random() * cells.length)];
-          if (r2 === r && c2 === c) continue;
-          const t = g2[r][c]; g2[r][c] = g2[r2][c2]; g2[r2][c2] = t;
+      if (hillMove(g2, user, f1, f2, lockSyms)) {
+        const sc = scoreTotal(g2, opts);
+        if (sc >= cur || Math.random() < Math.exp((sc - cur) / T)) {
+          grid = g2; cur = sc;
+          if (sc > best) { best = sc; bg = g2.map(r => r.slice()); }
         }
-      } else if (move < 0.85) {
-        const spots = [];
-        for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++)
-          if (f1.includes(g2[r][c]) && f1.includes(g2[r + 1][c]) && f1.includes(g2[r][c + 1]) && f1.includes(g2[r + 1][c + 1])
-            && !user[r * 9 + c] && !user[(r + 1) * 9 + c] && !user[r * 9 + c + 1] && !user[(r + 1) * 9 + c + 1]) spots.push([r, c]);
-        if (!spots.length || !f2.length) continue;
-        const [r, c] = spots[Math.floor(Math.random() * spots.length)];
-        const sym = f2[Math.floor(Math.random() * f2.length)];
-        for (let dr = 0; dr < 2; dr++) for (let dc = 0; dc < 2; dc++) g2[r + dr][c + dc] = sym;
-      } else {
-        const anchors = getAnchors(g2).filter(a => f2.includes(a[0]) && !cropOverlapsUser(a[0], a[1], a[2], user));
-        if (!anchors.length) continue;
-        const [sym, r, c] = anchors[Math.floor(Math.random() * anchors.length)];
-        for (let dr = 0; dr < 2; dr++) for (let dc = 0; dc < 2; dc++) g2[r + dr][c + dc] = f1[Math.floor(Math.random() * f1.length)];
       }
-      const sc = scoreTotal(g2, opts);
-      if (sc > cur || Math.random() < 0.001) { grid = g2; cur = sc; if (sc > best) { best = sc; bg = g2.map(r => r.slice()); } }
+      T *= cool;
     }
     return [bg, best];
   }
   /* `pins` is an optional array of { sym, r, c } crops that must stay at their
    * exact anchors. The optimizer places them first (immutable), then places the
-   * remaining selection around them, then fills/hill-climbs the free space. A
-   * pinned crop's symbol is added to the selection set so the autofill pools
-   * never re-insert it. */
+   * remaining selection around them, then fills and anneals the whole plot.
+   * Unpinned selected crops are part of the move space — as a bill of materials
+   * they may be relocated, never deleted or retyped away — and a pinned crop's
+   * symbol is added to the selection set so the autofill pools never re-insert
+   * it. */
   function optimizeSynergy(selection, fill, iters, opts, pins) {
     const sel = new Set(SYMS.filter(s => selection[s] > 0));
     if (pins) for (const p of pins) sel.add(p.sym);
@@ -698,6 +760,9 @@
       const reduced = f1.filter(s => !bigBuffs.has(CROP[s].buff));
       if (reduced.length) f1 = reduced;
     }
+    // Symbols whose instance count the search must preserve: the user's
+    // selection, minus anything the (fallback) autofill pools can re-insert.
+    const locked = new Set([...sel].filter(s => !f1.includes(s) && !f2.includes(s)));
     // Placement. buildGrid is a randomised greedy placer, so a single attempt can
     // fail — or pack differently — by chance even when the selection fits. A
     // failed attempt costs ~0.1 ms, so instead of calling a run unfittable while
@@ -721,14 +786,14 @@
       if (!r) return [null, 0];
       placed.push(r);
     }
-    // Hill-climb every packing; the iters budget is split across the restarts.
+    // Anneal every packing; the iters budget is split across the restarts.
     let bestg = null, bestsc = -Infinity;
     for (const r of placed) {
       let g = r.grid;
       const user = r.user;
       if (fill) {
         g = fillInitial(g, f1, f2);
-        const [bg, b] = hillfill(g, user, Math.max(1500, Math.floor(iters / restarts)), f1, f2, opts);
+        const [bg, b] = hillfill(g, user, Math.max(1500, Math.floor(iters / restarts)), f1, f2, opts, locked);
         if (bg && b > bestsc) { bestsc = b; bestg = bg; }
       } else {
         const s = scoreTotal(g, opts);
@@ -1007,8 +1072,8 @@
     buildInstances, analyzeLayout, scoreFull, scoreTotal,
     analyze: analyzeLayout,
     validateLayout,
-    canPlace, localBuff, buildGrid, cropOverlapsUser, fillInitial,
-    getAnchors, hillfill, optimizeSynergy,
+    canPlace, localBuff, buildGrid, fillInitial,
+    hillfill, optimizeSynergy,
     harvestSchedule, cycleText, simulate,
     encodeAisen, AISEN_CROP, AISEN_FERT,
     decodeAisen, expandPlotCode,
