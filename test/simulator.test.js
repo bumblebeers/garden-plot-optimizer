@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
-const { simulate, analyze, makeOpts, normalizeBuffOrder, scoreTotal, CROP, optimizeSynergy } = require('../src/garden.js');
+const { simulate, analyze, makeOpts, normalizeBuffOrder, scoreTotal, CROP, SYMS, FERTBUFFS, optimizeSynergy } = require('../src/garden.js');
 
 function emptyGrid() { return Array.from({ length: 9 }, () => Array(9).fill(null)); }
 function place(grid, sym, r, c) {
@@ -33,15 +33,17 @@ test('single crop, no fertilizer: carrot', () => {
   approx(s.forward.incomePerDay, 23.17, 0.5);
 });
 
-test('single crop, default fertilizer: carrot gets QualityUp', () => {
-  // default objective is income -> buffOrder Q first; no Q neighbours -> fb=Q
-  // -> starChance 0.5, expectedValue 34*1.25=42.5 ; Q -> starChance 0.75 ->
-  // expectedValue 34*1.375 = 46.75 ; gross = 2*46.75/3 = 31.17 ;
-  // net = 31.17 - seed(7/3=2.33) - fert(2) = 26.83
+test('single crop, default fertilizer: carrot gets HarvestBoost (the class that pays most)', () => {
+  // income objective: the class is chosen by gold, not by the buff-priority order
+  // (which still lists QualityUp first by default). Harvest Boost takes the carrot
+  // from 2 to 3 units/harvest: gross 3*38.25/3 = 38.25 against 31.17 for QualityUp,
+  // for 5 gold/tile/day of fertiliser against QualityUp's 2.
+  // net = 38.25 - seed(7/3=2.33) - fert(5) = 30.92
   const g = emptyGrid(); g[0][0] = 'r';
   const s = simulate(g, makeOpts(), 6);
-  approx(s.analytic.incomePerDay, 26.83, 0.01);
-  assert.strictEqual(s.analytic.fertBy.Q, 1); // one tile of QualityUp
+  approx(s.analytic.incomePerDay, 30.92, 0.01);
+  assert.strictEqual(s.analytic.fertBy.H, 1); // one tile of HarvestBoost
+  assert.strictEqual(s.analytic.fertBy.Q, 0);
 });
 
 test('all one crop, no fertilizer: 81 carrots', () => {
@@ -55,12 +57,12 @@ test('all one crop, no fertilizer: 81 carrots', () => {
   approx(s.analytic.fert, 0); // no fertilizer used
 });
 
-test('all one crop, default fertilizer: 81 carrots get QualityUp', () => {
+test('all one crop, default fertilizer: 81 carrots get HarvestBoost', () => {
   const g = Array.from({ length: 9 }, () => Array(9).fill('r'));
   const s = simulate(g, makeOpts(), 30);
-  // net per carrot = 2*46.75/3 - 7/3 - 2 = 26.83 ; x81 = 2173.5
-  approx(s.analytic.incomePerDay, 81 * 26.83, 0.5);
-  approx(s.analytic.fertBy.Q, 81);
+  // net per carrot = 3*38.25/3 - 7/3 - 5 = 30.92 ; x81 = 2504.25
+  approx(s.analytic.incomePerDay, 81 * 30.92, 0.5);
+  approx(s.analytic.fertBy.H, 81);
 });
 
 test('same-type rule: crops do not buff themselves or same-species neighbours', () => {
@@ -123,10 +125,10 @@ test('multi-harvest crop harvest schedule (apple, 2 cycles)', () => {
   const g = emptyGrid(); place(g, 'A', 0, 0);
   const s = simulate(g, makeOpts(), 60);
   assert.strictEqual(s.perCrop[0].harvests, 8); // 2 cycles * 4
-  // default objective income -> isolated apple gets Q fert (starChance 0.5, expectedValue 96*1.25=120)
-  // Q -> starChance 0.75 -> expectedValue 96*1.375 = 132 ; gross = 16*4*132/30 = 281.6 ;
-  // net = 281.6 - seed(700/30=23.33) - fert(9*2 = 18) = 240.27
-  approx(s.analytic.incomePerDay, 240.27, 0.1);
+  // default objective income -> isolated apple buys HarvestBoost (24 vs 16
+  // units/harvest pays better than QualityUp's star chance, even at 9 tiles of
+  // 5 gold): gross = 24*4*96*1.125/30 = 345.6 ; net = 345.6 - seed(700/30) - fert(45) = 277.27
+  approx(s.analytic.incomePerDay, 277.27, 0.1);
   approx(s.forward.incomePerDay, s.analytic.incomePerDay, 5);
 });
 
@@ -197,6 +199,59 @@ test('cropMix=false drops the crop-mix bias from the score', () => {
   const a = analyze(g, on);
   // the difference between on/off is exactly the 0.1*pref tie-breaker
   approx(scoreTotal(g, on) - scoreTotal(g, off), 0.1 * a.pref, 1e-9);
+});
+
+test('income objective buys each crop the fertiliser class that pays most', () => {
+  // The buff-priority list is a tie-break, not the rule: for every crop planted
+  // on its own, the class the model assigns must be the best of
+  // {none, H, Q, W, N} by net gold/day — not simply the first buff in the user's
+  // order (which lists QualityUp first by default).
+  const none = () => makeOpts({ fert: { H: false, Q: false, W: false, N: false } });
+  const only = (b) => makeOpts({ fert: { H: false, Q: false, W: false, N: false, [b]: true } });
+  for (const sym of SYMS) {
+    const g = emptyGrid(); place(g, sym, 0, 0);
+    let best = { cls: 'None', income: analyze(g, none()).income };
+    for (const b of FERTBUFFS) {
+      const income = analyze(g, only(b)).income;
+      if (income > best.income + 1e-9) best = { cls: b, income };
+    }
+    const auto = analyze(g, makeOpts());            // default: income, order Q,H,W,N
+    assert.strictEqual(auto.instances[0].fert, best.cls, `${CROP[sym].name}: fertiliser class`);
+    approx(auto.income, best.income, 1e-6);
+  }
+});
+
+test('income objective buys no fertiliser that cannot pay (Water Retain / Weed Block)', () => {
+  // W/N change neither yield nor star chance, so under the income objective they
+  // can only add cost. The sharp case is a crop already receiving Harvest and
+  // Quality from its neighbours — the old priority rule bought it HydratePro.
+  const g = emptyGrid();
+  g[0][0] = 'p'; g[0][1] = 't'; g[1][0] = 'o';   // potato: H from corn, Q from cotton
+  const a = analyze(g, makeOpts());
+  const potato = a.instances.find((it) => it.sym === 'p');
+  assert.ok(potato.got.H && potato.got.Q, 'the potato receives Harvest + Quality from neighbours');
+  assert.strictEqual(potato.fert, 'None', 'a crop the neighbours already buff pays nothing');
+  assert.strictEqual(a.fertBy.W + a.fertBy.N, 0, 'W/N fertiliser is never bought under income');
+  // enabling W/N therefore cannot change the income reported for this layout
+  const hqOnly = makeOpts({ fert: { H: true, Q: true, W: false, N: false } });
+  approx(a.income, analyze(g, hqOnly).income, 1e-9);
+});
+
+test('income score is net income alone once the crop-mix bias is off', () => {
+  // The coverage tie-break used to ride on top of income under this objective,
+  // so gold-free Water Retain / Weed Block coverage could outrank real gold.
+  // With the crop mix off ("let the optimizer pick") the score the optimizer
+  // ranks by must be exactly the income figure the app reports.
+  const g = emptyGrid();
+  place(g, 'S', 0, 0); place(g, 'F', 0, 2); place(g, 'B', 0, 4); place(g, 'P', 0, 6);
+  for (let r = 2; r < 9; r++) for (let c = 0; c < 9; c++) g[r][c] = (r + c) % 2 ? 'T' : 'o';
+  const opts = makeOpts({ cropMix: false });
+  const a = analyze(g, opts);
+  assert.ok(a.H > 0 && a.Q > 0 && a.W > 0, 'the layout has coverage the old tie-break paid for');
+  approx(scoreTotal(g, opts), a.income, 1e-9);
+  // the buff order cannot move income either, however it is ranked
+  const reordered = analyze(g, makeOpts({ cropMix: false, buffOrder: ['N', 'W', 'Q', 'H'] }));
+  approx(reordered.income, a.income, 1e-9);
 });
 
 test('yield objective produces more items/day than income objective on the same selection', () => {

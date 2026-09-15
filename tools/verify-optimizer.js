@@ -206,7 +206,8 @@ const scenarios = [
   { name: 'apple + 2 beans + pumpkin', selection: { A: 1, F: 2, P: 1 }, opts: {} },
   { name: '4 blueberries + 4 peppers', selection: { B: 4, S: 4 }, opts: {} },
   { name: 'prefer big 2x2 (blueberry/pepper)', selection: { B: 3, S: 3 }, opts: { preferBig: true } },
-  // income objective: the buff order is fully user-configurable
+  // income objective: the fertiliser class is picked by gold, so the buff order
+  // only breaks ties between equally-paying classes (still exercised here)
   { name: 'custom buff order (income)', selection: { r: 6, K: 4 }, opts: { buffOrder: ['H', 'W', 'Q', 'N'] } },
   { name: 'no fertilizer allowed', selection: { o: 6, T: 6 }, opts: { fert: { H: false, Q: false, W: false, N: false } } },
   // maximize the number of crops (items) per day instead of net coin

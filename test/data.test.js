@@ -71,24 +71,26 @@ test('wiki-verified: single isolated Carrot (no fert) yields 2/3 unit/day, 18.8 
   approx(s.analytic.incomePerDay, 23.17, 0.05);
 });
 
-test('wiki-verified: single isolated Corn (default fert) yields 2/5 unit/day, 28 gold/day net', () => {
-  // wiki: 5 days, 1 harvest, 2 yield; pv 60; seed 15. No H neighbour -> QualityUp fert.
-  // Q -> starChance 0.75, expectedValue 60*1.375=82.5 ; net = 2*82.5/5 - 15/5 - fert(2) = 33 - 3 - 2 = 28
+test('wiki-verified: single isolated Corn (default fert) yields 3/5 unit/day, 32.5 gold/day net', () => {
+  // wiki: 5 days, 1 harvest, 2 yield; pv 60; seed 15. No H neighbour -> the income
+  // objective buys HarvestBoost (3 units/harvest x67.5 = 40.5 gross, 5 gold).
+  // net = 3*67.5/5 - 15/5 - fert(5) = 40.5 - 3 - 5 = 32.5
   const g = Array.from({ length: 9 }, () => Array(9).fill(null));
   g[0][0] = 'o';
   const s = simulate(g, makeOpts(), 30);
-  approx(s.analytic.yieldsPerDay.o, 2 / 5);
-  approx(s.analytic.incomePerDay, 28, 0.05);
+  approx(s.analytic.yieldsPerDay.o, 3 / 5);
+  approx(s.analytic.incomePerDay, 32.5, 0.05);
 });
 
-test('wiki-verified: single isolated Tomato (default fert) yields 2*4/10 unit/day, 31.4 gold/day net', () => {
-  // wiki: 4+2+2+2 (10 days), 4 harvests, 2 yield; pv 34; seed 40. No W neighbour -> QualityUp fert.
-  // Q -> starChance 0.75, expectedValue 34*1.375=46.75 ; net = 2*4*46.75/10 - 40/10 - fert(2) = 37.4 - 4 - 2 = 31.4
+test('wiki-verified: single isolated Tomato (default fert) yields 3*4/10 unit/day, 36.9 gold/day net', () => {
+  // wiki: 4+2+2+2 (10 days), 4 harvests, 2 yield; pv 34; seed 40. No W neighbour ->
+  // the income objective buys HarvestBoost: gross 3*4*38.25/10 = 45.9, 5 gold.
+  // net = 45.9 - 40/10 - fert(5) = 36.9
   const g = Array.from({ length: 9 }, () => Array(9).fill(null));
   g[0][0] = 'T';
   const s = simulate(g, makeOpts(), 30);
-  approx(s.analytic.yieldsPerDay.T, 2 * 4 / 10); // 0.8
-  approx(s.analytic.incomePerDay, 31.4, 0.05);
+  approx(s.analytic.yieldsPerDay.T, 3 * 4 / 10); // 1.2
+  approx(s.analytic.incomePerDay, 36.9, 0.05);
 });
 
 test('wiki-verified: Apple needs 3 Harvest neighbours to receive the Harvest buff', () => {
