@@ -42,7 +42,9 @@ the 14 autofill crops.
   set which crops (of that buff) the autofill prefers.
 
 **Views.** The plot is always merged — a 3×3 apple tree renders as one block, not
-nine cells. **Click any tile** for its detail card: yield and growth/production
+nine cells. A **colour legend** below the plot maps every crop to its tile colour,
+and each fertilized tile carries the fertiliser class letter (**H**/**Q**/**W**/**N**;
+no letter = none needed). **Click any tile** for its detail card: yield and growth/production
 cycle, the buffs it receives *and which neighbouring crops supply them* (with a
 partial flag when it's short of the required count), what it provides, the
 fertilizer on that spot, and one-click swaps for interchangeable crops (same buff
