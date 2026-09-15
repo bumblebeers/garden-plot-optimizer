@@ -97,6 +97,8 @@
   .yrow .sw{width:12px;height:12px;border-radius:3px;display:inline-block}
   .note{font-size:12px;color:var(--muted);line-height:1.5;margin-top:6px}
   #fertKey .fk{display:inline-block;width:16px;height:16px;border-radius:4px;color:#fff;font-size:10px;font-weight:700;text-align:center;line-height:16px;margin:0 3px 0 2px;vertical-align:middle}
+  .cell .fmark{position:absolute;top:2px;left:2px;font-size:9px;font-weight:800;color:#fff;border-radius:3px;padding:0 3px;line-height:1.5;text-shadow:none}
+  .fH{background:#2a5a2a}.fQ{background:#5a3a7a}.fW{background:#2a4a7a}.fN{background:#555}
   .legend{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-top:6px}
   .legend .it{display:flex;align-items:center;gap:4px}
   .legend .sw{width:12px;height:12px;border-radius:3px;display:inline-block}
@@ -1091,6 +1093,10 @@ function renderGrid(){
       if(pins.has(ar*9+ac))cell.classList.add('pinned');
       cell.onclick=(e)=>{ if(pinMode) togglePin(ar,ac); else openCellInfo(it.sym,ar,ac,e); };
       cell.textContent=d.icon;
+      if(it.fert!=='None'){
+        const fm=document.createElement('span');fm.className='fmark f'+it.fert;fm.textContent=it.fert;
+        cell.appendChild(fm);
+      }
       gridEl.appendChild(cell);
     }
   }
@@ -1108,11 +1114,10 @@ function renderStats(){
   const fb=info.fertBy;const anyFert=fb.H+fb.Q+fb.W+fb.N>0;
   const fertTxt=anyFert?`${info.fert} /day`:'none';
   const fertSub=anyFert?`${['H','Q','W','N'].filter(b=>fb[b]>0).map(b=>`${BUFFNAME[b]}: ${fb[b]}`).join(' · ')}`:'';
-  // buff coverage as % of PLANTED tiles that receive each buff (paliaguide-style)
-  const planted=Object.keys(info.cellinfo).length;
+  // buff coverage as % of the plot (all 81 tiles) that receive each buff
   const covTile={H:0,Q:0,W:0,N:0};
   for(const k in info.cellinfo){const got=info.cellinfo[k].got; for(const b of ['H','Q','W','N']) if(got[b]) covTile[b]++;}
-  const pct=(b)=>planted?Math.round(covTile[b]/planted*100):0;
+  const pct=(b)=>Math.round(covTile[b]/81*100);
   const covTxt=`${BUFFNAME.H} ${pct('H')}% · ${BUFFNAME.Q} ${pct('Q')}% · ${BUFFNAME.W} ${pct('W')}% · ${BUFFNAME.N} ${pct('N')}%`;
   const net=Math.round(info.income).toLocaleString(), gross=Math.round(info.gross).toLocaleString(),
         seed=Math.round(info.seedCost).toLocaleString(), fc=Math.round(info.fertCost).toLocaleString();
@@ -1133,11 +1138,11 @@ function renderStats(){
 function renderFertKey(){
   const el=document.getElementById('fertKey');if(!el)return;
   el.innerHTML=`<b>Fertilizer key:</b>
-    <span class="fk" style="background:#2a5a2a">H</span> HarvestBoost ·
-    <span class="fk" style="background:#5a3a7a">Q</span> QualityUp ·
-    <span class="fk" style="background:#2a4a7a">W</span> HydratePro ·
-    <span class="fk" style="background:#555">X</span> WeedBlock ·
-    <span class="fk" style="background:#333">·</span> none needed`;
+    <span class="fk fH">H</span> ${BUFFNAME.H} ·
+    <span class="fk fQ">Q</span> ${BUFFNAME.Q} ·
+    <span class="fk fW">W</span> ${BUFFNAME.W} ·
+    <span class="fk fN">N</span> ${BUFFNAME.N} ·
+    no mark = none needed`;
 }
 function renderLegend(){
   const el=document.getElementById('legend');
@@ -1232,10 +1237,9 @@ function renderWeights(){
     });
   });
 }
-function render(){renderSelection();renderSpace();renderGrid();renderStats();renderFertKey();}
+function render(){renderSelection();renderSpace();renderGrid();renderStats();renderFertKey();renderLegend();}
 
 /* ---------- cell info popup (buffs + suppliers, cycle, fertilizer, swap) ---------- */
-const FERTLABEL={H:'HarvestBoost',Q:'QualityUp',W:'HydratePro',N:'WeedBlock'};
 function supList(it,b){const sups=it.sup[b]||{};
   return Object.entries(sups).map(([s,n])=>CROP[s].name+(n>1?'×'+n:'')).join(', ');}
 function openCellInfo(sym,r,c,e){
@@ -1256,15 +1260,15 @@ function openCellInfo(sym,r,c,e){
   if(!recv)recv='<div class="kv lbl">none — isolated, or all neighbours share its type</div>';
   // fertilizer for this plant
   let fert;
-  if(it.fert!=='None'){fert=`<b>${FERTLABEL[it.fert]}</b> <span class="lbl">(${it.fert})</span>`;}
+  if(it.fert!=='None'){fert=`<b>${BUFFNAME[it.fert]}</b> <span class="lbl">(${it.fert})</span>`;}
   else{
     const missing=FERTBUFFS.filter(b=>!it.got[b]);   // buffs no neighbour supplies
     const allowed=missing.filter(b=>OPT.fert[b]);    // ...whose class the user allows
     fert=!missing.length
       ?`none needed — <span class="lbl">all four buffs from neighbours</span>`
       :allowed.length
-        ?`none — <span class="lbl">no allowed class pays off here (${missing.map(b=>FERTLABEL[b]).join(', ')} missing)</span>`
-        :`none — <span class="lbl">${missing.map(b=>FERTLABEL[b]).join(', ')} not allowed</span>`;
+        ?`none — <span class="lbl">no allowed class pays off here (${missing.map(b=>BUFFNAME[b]).join(', ')} missing)</span>`
+        :`none — <span class="lbl">${missing.map(b=>BUFFNAME[b]).join(', ')} not allowed</span>`;
   }
   // interchangeable crops (same buff & footprint)
   const alts=SYMS.filter(x=>x!==sym&&CROP[x].buff===d.buff&&CROP[x].sz[0]===d.sz[0]&&CROP[x].sz[1]===d.sz[1]);
