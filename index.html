@@ -33,6 +33,12 @@
   .mini:hover{background:var(--line)}
   .mini:disabled{opacity:.3;cursor:not-allowed}
   .mini:disabled:hover{background:var(--panel)}
+  .btn.small{padding:6px 10px;font-size:12px;width:auto;margin-top:0;flex:none}
+  .importrow{display:flex;gap:6px;align-items:center;margin-top:12px}
+  .importrow input{flex:1;min-width:0;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:7px 9px;color:var(--text);font-size:12.5px}
+  .importrow input:focus{outline:none;border-color:var(--accent)}
+  .cell.pinned{border:2px solid var(--warn);box-shadow:0 0 0 2px rgba(224,165,58,.35)}
+  .cell.pinned::after{content:'📌';position:absolute;top:1px;right:2px;font-size:10px;text-shadow:none;opacity:.95}
   .btn{background:var(--accent);color:#12200f;border:none;border-radius:10px;padding:11px 14px;font-size:14px;font-weight:700;
     cursor:pointer;width:100%;margin-top:12px}
   .btn:hover{filter:brightness(1.08)}
@@ -144,6 +150,15 @@
 
     <div class="panel" style="margin-top:14px">
       <h2>Generate</h2>
+      <div class="importrow">
+        <input type="text" id="aisenImport" placeholder="Paste an Aisen save link/code…" spellcheck="false">
+        <button class="btn small" id="importBtn" title="Import the layout from Aisen's Palia Garden Planner">Import</button>
+      </div>
+      <div class="optrow" style="margin-top:10px">
+        <input type="checkbox" id="pinModeToggle">
+        <label for="pinModeToggle">📌 Pin mode — click crops to pin/unpin</label>
+        <button class="mini" id="clearPinsBtn" title="Unpin all crops" style="margin-left:auto">✕</button>
+      </div>
       <div class="optrow"><input type="checkbox" id="fillToggle" checked>
         <label for="fillToggle">Fill remaining space with best-fit crops</label></div>
       <button class="btn" id="optimizeBtn">⚙ Optimize arrangement</button>
@@ -159,7 +174,7 @@
     <div class="stats" id="stats"></div>
     <div class="legend" id="legend"></div>
     <div class="note" id="fertKey"></div>
-    <div class="note" id="note">Set your <b>Preferences</b>, pick crops, then hit <b>Optimize</b>. The plot shows merged blocks (a 3×3 tree is one tile). <b>Click any tile</b> for its details — yield &amp; cycle, the buffs it receives and which neighbours supply them, the fertilizer on it, and swaps for interchangeable crops. Buffs: H=Harvest (yield), Q=Quality (star), W=Water-retain, N=Weed-block.</div>
+    <div class="note" id="note">Set your <b>Preferences</b>, pick crops, then hit <b>Optimize</b>. The plot shows merged blocks (a 3×3 tree is one tile). <b>Click any tile</b> for its details — yield &amp; cycle, the buffs it receives and which neighbouring crops supply them, the fertilizer on it, and swaps for interchangeable crops. <b>Import</b> an Aisen save link/code to load a layout (including a partially finished one), then <b>Pin mode</b> (or the 📌 button) to lock crops in place so <b>Optimize</b> never moves them. Buffs: H=Harvest (yield), Q=Quality (star), W=Water-retain, N=Weed-block.</div>
   </div>
 </div>
 <div id="swapPopup" class="swap-pop" style="display:none"></div>
@@ -489,12 +504,33 @@
     const need = CROP[sym].need;
     return Object.values(cnt).filter(x => x >= need).length;
   }
-  function buildGrid(selection) {
+  /* Build a 9x9 grid for a selection, placing any pinned crops first at their
+   * exact anchors. Pinned cells are marked in `user` so the fill/hill-climb
+   * never moves them. `pins` is an array of { sym, r, c } anchors (top-left
+   * tile of each pinned crop); it is optional. Returns null if a pin cannot be
+   * placed (overlap / out of bounds) or the remaining selection cannot fit. */
+  function buildGrid(selection, pins) {
     const grid = Array.from({ length: 9 }, () => Array(9).fill(null));
     const user = Array(81).fill(false);
+    const pinCounts = {};
+    if (pins) {
+      for (const p of pins) {
+        const h = CROP[p.sym].sz[0], w = CROP[p.sym].sz[1];
+        if (p.r + h > 9 || p.c + w > 9) return null;
+        for (let dr = 0; dr < h; dr++) for (let dc = 0; dc < w; dc++) {
+          if (grid[p.r + dr][p.c + dc] != null) return null;
+        }
+        for (let dr = 0; dr < h; dr++) for (let dc = 0; dc < w; dc++) {
+          grid[p.r + dr][p.c + dc] = p.sym;
+          user[(p.r + dr) * 9 + p.c + dc] = true;
+        }
+        pinCounts[p.sym] = (pinCounts[p.sym] || 0) + 1;
+      }
+    }
     const order = SYMS.filter(s => selection[s] > 0).sort((a, b) => CROP[b].sz[0] * CROP[b].sz[1] - CROP[a].sz[0] * CROP[a].sz[1]);
     for (const sym of order) {
-      for (let k = 0; k < selection[sym]; k++) {
+      const remaining = (selection[sym] || 0) - (pinCounts[sym] || 0);
+      for (let k = 0; k < remaining; k++) {
         const h = CROP[sym].sz[0], w = CROP[sym].sz[1];
         const cands = [];
         for (let r = 0; r <= 9 - h; r++) for (let c = 0; c <= 9 - w; c++) if (canPlace(grid, sym, r, c)) {
@@ -591,8 +627,14 @@
     }
     return [bg, best];
   }
-  function optimizeSynergy(selection, fill, iters, opts) {
+  /* `pins` is an optional array of { sym, r, c } crops that must stay at their
+   * exact anchors. The optimizer places them first (immutable), then places the
+   * remaining selection around them, then fills/hill-climbs the free space. A
+   * pinned crop's symbol is added to the selection set so the autofill pools
+   * never re-insert it. */
+  function optimizeSynergy(selection, fill, iters, opts, pins) {
     const sel = new Set(SYMS.filter(s => selection[s] > 0));
+    if (pins) for (const p of pins) sel.add(p.sym);
     let f1 = FILL.filter(s => !sel.has(s)); if (!f1.length) f1 = FILL.slice();
     let f2 = PROVIDERS.filter(s => !sel.has(s)); if (!f2.length) f2 = PROVIDERS.slice();
     if (opts.preferBig) {
@@ -603,7 +645,7 @@
     const restarts = fill ? 10 : 1;
     let bestg = null, bestsc = -1;
     for (let k = 0; k < restarts; k++) {
-      const r = buildGrid(selection);
+      const r = buildGrid(selection, pins);
       if (!r) return [null, 0];
       let g = r.grid;
       const user = r.user;
@@ -794,6 +836,94 @@
     return settings ? code + '_' + settings : code;
   }
 
+  /* ---------- Aisen import codec ----------
+   * Decode an Aisen v0.5 save code (the `?layout=` value from palia-tools) back
+   * into our 9x9 grid. This is the inverse of encodeAisen and the mirror of
+   * Aisen's own `expandPlotCode` + `GardenGridBasic.placeCrop`. Aisen writes a
+   * crop only at its start (top-left) tile; every other tile of its footprint is
+   * 'N', so we reconstruct the full footprint from the start tile.
+   *
+   * A "partially finished" plot is one with empty ('N') tiles — the 9x9 grid is
+   * left with null cells there, which validateLayout and the app both accept.
+   * Returns { grid, level, starSeeds }. The per-tile fertilizer Aisen carries is
+   * parsed but not returned: the app stores only crop symbols and re-derives the
+   * fertilizer assignment in analyzeLayout on the next Optimize.
+   */
+  /* Run-length decode a plot's compressed tile string (Aisen's expandPlotCode). */
+  function expandPlotCode(code) {
+    const tokens = code.match(/[A-Z][a-z]*(?:\.[A-Z][a-z]*)?\d*/g) || [];
+    const out = [];
+    for (const token of tokens) {
+      const m = token.match(/^([A-Z][a-z]*(?:\.[A-Z][a-z]*)?)(\d*)$/);
+      if (!m) continue;
+      const count = m[2] ? parseInt(m[2], 10) : 1;
+      for (let i = 0; i < Math.min(count, 1000); i++) out.push(m[1]);
+    }
+    return out;
+  }
+
+  /* Decode an Aisen v0.5 save code into a 9x9 grid. Throws with a readable
+   * message on an unsupported version, malformed section, unknown crop code,
+   * overlapping/out-of-bounds crop, or a plot dimension other than 9x9. */
+  function decodeAisen(code) {
+    if (typeof code !== 'string' || !code) throw new Error('Empty Aisen save code');
+    const parts = code.split('_');
+    const version = (parts[0] || '').replace(/^v/, '');
+    if (version !== '0.5') throw new Error(`Unsupported Aisen save version '${version || '(none)'}' (only 0.5 is supported)`);
+    const dimension = parts[1] || '';
+    const cropInfo = parts[2] || '';
+    const settings = parts.slice(3).join('_');
+    // Aisen trims empty edge rows/columns (trimGarden), so a partially finished
+    // plot can have a dimension smaller than 9x9 (e.g. D-3x3, D-9x3). Accept any
+    // WxH; crops are placed into our 9x9 grid at their (trimmed) coordinates and
+    // are rejected if they would extend past the 9x9 plot.
+    const dm = dimension.match(/^D-(\d+)x(\d+)$/);
+    if (!dm) throw new Error(`Invalid Aisen dimension '${dimension}'`);
+    const plots = cropInfo.split('-');
+    if (plots[0] !== 'CR') throw new Error('Invalid Aisen crop section');
+    const rev = Object.fromEntries(Object.entries(AISEN_CROP).map(([s, c]) => [c, s]));
+    const grid = Array.from({ length: 9 }, () => Array(9).fill(null));
+    const filled = new Set();
+    for (const p of plots.slice(1)) {
+      const m = p.match(/^(\d+)x(\d+)(.*)$/);
+      if (!m) throw new Error(`Invalid Aisen plot '${p}'`);
+      const px = +m[1], py = +m[2];
+      if (px > 9 || py > 9) throw new Error(`Aisen plot at ${px}x${py} is out of bounds`);
+      const tiles = expandPlotCode(m[3]);
+      if (tiles.length !== 9) throw new Error(`Aisen plot ${px}x${py} must decode to 9 tiles (got ${tiles.length})`);
+      for (let i = 0; i < 9; i++) {
+        const r = py + Math.floor(i / 3), c = px + (i % 3);
+        if (r >= 9 || c >= 9) throw new Error(`Aisen tile at ${r},${c} is out of bounds`);
+        const key = r * 9 + c;
+        const tm = tiles[i].match(/^([A-Z][a-z]*)(?:\.([A-Z][a-z]*))?$/);
+        if (!tm) throw new Error(`Invalid Aisen tile '${tiles[i]}'`);
+        const cropCode = tm[1];
+        if (filled.has(key)) {
+          // An already-filled tile must be an empty 'N' (the rest of a crop's
+          // footprint); a crop code here would be a superimposition.
+          if (cropCode !== 'N') throw new Error(`Overlapping crops at ${r},${c}`);
+          continue;
+        }
+        if (cropCode === 'N') { filled.add(key); continue; }
+        const sym = rev[cropCode];
+        if (!sym) throw new Error(`Unknown Aisen crop code '${cropCode}'`);
+        const [h, w] = CROP[sym].sz;
+        if (r + h > 9 || c + w > 9) throw new Error(`${CROP[sym].name} at ${r},${c} exceeds the 9x9 plot`);
+        for (let dr = 0; dr < h; dr++) for (let dc = 0; dc < w; dc++) {
+          const rr = r + dr, cc = c + dc;
+          if (grid[rr][cc] != null) throw new Error(`Overlapping crops at ${rr},${cc}`);
+          grid[rr][cc] = sym;
+          filled.add(rr * 9 + cc);
+        }
+      }
+    }
+    // settings: L<level> (gardening level), Nss (star seeds OFF; Aisen defaults ON)
+    const levelMatch = settings.match(/L(\d+)/);
+    const level = levelMatch ? +levelMatch[1] : null;
+    const starSeeds = !settings.includes('Nss');
+    return { grid, level, starSeeds };
+  }
+
   return {
     CROP, SYMS, FILL, PROVIDERS, FERTBUFFS, GROUPS, RANK_W, DEFAULT_OPT,
     groupSyms, initShares, shareOf, cropBias, buffWeights, makeOpts, normalizeBuffOrder, starChanceOf,
@@ -804,6 +934,7 @@
     getAnchors, hillfill, optimizeSynergy,
     harvestSchedule, cycleText, simulate,
     encodeAisen, AISEN_CROP, AISEN_FERT,
+    decodeAisen, expandPlotCode,
   };
 });
 
@@ -813,6 +944,7 @@
 const {
   CROP, SYMS, FILL, PROVIDERS, FERTBUFFS, GROUPS,
   groupSyms, initShares, analyze, optimizeSynergy, cycleText, encodeAisen,
+  decodeAisen, validateLayout,
 } = Garden;
 /* ---------- user options (UI state, passed into the shared logic) ---------- */
 const OPT={
@@ -829,6 +961,8 @@ const OPT={
 let selection={};        // sym -> count
 let currentGrid=null;
 let optimizing=false;
+let pins=new Set();      // anchor cell indices (r*9+c) of pinned crop instances
+let pinMode=false;       // when true, clicking a crop tile toggles its pin
 
 function tilesUsed(){let t=0;for(const s in selection)t+=selection[s]*CROP[s].sz[0]*CROP[s].sz[1];return t;}
 
@@ -854,6 +988,7 @@ function renderSelection(){
       if(d>0 && tilesUsed()+tiles>81) return;   // don't exceed the 81-tile plot
       selection[s]=(selection[s]||0)+d;if(selection[s]<=0)delete selection[s];
     }
+    if(!selection[s])unpinSym(s);
     render();});
 }
 function renderSpace(){
@@ -876,7 +1011,8 @@ function renderGrid(){
       cell.style.gridRow=(ar+1)+' / span '+h;cell.style.gridColumn=(ac+1)+' / span '+w;
       cell.style.background=d.color;
       cell.dataset.r=ar;cell.dataset.c=ac;cell.dataset.sym=it.sym;
-      cell.onclick=(e)=>openCellInfo(it.sym,ar,ac,e);
+      if(pins.has(ar*9+ac))cell.classList.add('pinned');
+      cell.onclick=(e)=>{ if(pinMode) togglePin(ar,ac); else openCellInfo(it.sym,ar,ac,e); };
       cell.textContent=d.icon;
       gridEl.appendChild(cell);
     }
@@ -1050,8 +1186,11 @@ function openCellInfo(sym,r,c,e){
   const swapBlock=alts.length
     ?`<div class="opts">`+alts.map(x=>`<button class="opt" data-s="${x}"><span class="sw" style="background:${CROP[x].color}"></span><span>${CROP[x].name}<div class="lbl">${CROP[x].yld}→${CROP[x].yldB}/harvest · ${(CROP[x].yldB*CROP[x].harv/CROP[x].cycle).toFixed(1)}/day</div></span></button>`).join('')+`</div>`
     :`<div class="none">No same-buff, same-size alternatives.</div>`;
+  const pkey=it.anchor[0]*9+it.anchor[1];
+  const isPin=pins.has(pkey);
   pop.innerHTML=`
-    <div class="ttl">${d.name} <span class="lbl">· ${d.sz[0]}×${d.sz[1]}</span></div>
+    <div class="ttl">${d.name} <span class="lbl">· ${d.sz[0]}×${d.sz[1]}</span>
+      <button class="opt" data-pin="1" style="margin-top:4px">📌 ${isPin?'Unpin':'Pin'} this crop</button></div>
     <div class="kv"><span class="lbl">Yields</span> ${d.yld}${d.yldB!==d.yld?` → <b>${d.yldB}</b> boosted`:''} /harvest · ≈${it.yd.toFixed(1)}/day</div>
     <div class="kv"><span class="lbl">Cycle</span> ${cycleText(d)}</div>
     <div class="sect"><div class="ttl">Buffs received</div>${recv}</div>
@@ -1061,7 +1200,14 @@ function openCellInfo(sym,r,c,e){
   pop.style.display='block';
   pop.style.left=Math.min(e?e.clientX:80,window.innerWidth-300)+'px';
   pop.style.top=Math.min(e?e.clientY:80,window.innerHeight-380)+'px';
-  pop.querySelectorAll('.opt').forEach(btn=>btn.onclick=()=>{swapCrop(r,c,btn.dataset.s);hideSwap();});
+  pop.querySelectorAll('.opt').forEach(btn=>btn.onclick=()=>{
+    if(btn.dataset.pin){
+      togglePin(r,c);
+      btn.textContent = pins.has(pkey) ? '📌 Unpin this crop' : '📌 Pin this crop';
+      return;
+    }
+    swapCrop(r,c,btn.dataset.s);hideSwap();
+  });
 }
 function hideSwap(){document.getElementById('swapPopup').style.display='none';}
 function swapCrop(r,c,newSym){
@@ -1074,6 +1220,69 @@ function swapCrop(r,c,newSym){
 }
 document.addEventListener('click',(e)=>{if(!e.target.closest||(!e.target.closest('#swapPopup')&&!e.target.closest('.cell')))hideSwap();});
 
+/* ---------- Aisen import + crop pinning ---------- */
+function countsFromGrid(grid){
+  const counts={};
+  const info=analyze(grid, OPT);
+  for(const it of info.instances) counts[it.sym]=(counts[it.sym]||0)+1;
+  return counts;
+}
+function importAisen(){
+  const input=document.getElementById('aisenImport');
+  const raw=(input.value||'').trim();
+  if(!raw){alert('Paste an Aisen save link or code first.');return;}
+  let code=raw;
+  const m=raw.match(/[?&]layout=([^&#]+)/);
+  if(m) code=decodeURIComponent(m[1]);
+  let res;
+  try{ res=decodeAisen(code); }
+  catch(err){ alert('Cannot import Aisen layout: '+err.message); return; }
+  const v=validateLayout(res.grid);
+  if(!v.valid){ alert('Imported layout is not a valid 9x9 packing: '+v.errors.join('; ')); return; }
+  currentGrid=res.grid;
+  selection=countsFromGrid(res.grid);
+  pins.clear();
+  // Apply the Aisen settings only when the code carries them; leave the user's
+  // own Preferences untouched otherwise. Aisen defaults star seeds ON, so a code
+  // with settings but no `Nss` flips the star-seed toggle ON — faithful to the
+  // shared layout, but it overrides the recipient's OFF preference; the user can
+  // toggle it back. Fertilizer is NOT restored: the grid stores only crop symbols
+  // and the assignment is re-derived in analyzeLayout on the next Optimize.
+  const hasSettings=code.split('_').length>3;
+  if(res.level!=null){ const lv=Math.max(0,Math.min(50,res.level)); OPT.level=lv; document.getElementById('levelInput').value=lv; }
+  if(hasSettings){ OPT.starSeeds=res.starSeeds; document.getElementById('starSeedsToggle').checked=res.starSeeds; }
+  input.value='';
+  render(); clearStale();
+}
+function togglePin(r,c){
+  if(!currentGrid) return;
+  const info=analyze(currentGrid, OPT);
+  const it=info.instances.find(x=>x.cells.includes(r*9+c));
+  if(!it) return;
+  const key=it.anchor[0]*9+it.anchor[1];
+  if(pins.has(key)) pins.delete(key); else pins.add(key);
+  renderGrid();
+}
+function pinsFromGrid(){
+  if(!currentGrid || pins.size===0) return null;
+  const info=analyze(currentGrid, OPT);
+  const list=[];
+  for(const it of info.instances){
+    const key=it.anchor[0]*9+it.anchor[1];
+    if(pins.has(key)) list.push({sym:it.sym, r:it.anchor[0], c:it.anchor[1]});
+  }
+  return list.length?list:null;
+}
+function unpinSym(sym){
+  // If a crop is removed from the selection menu, drop its pins too, so the next
+  // Optimize doesn't silently re-place a crop the user removed.
+  if(!currentGrid || pins.size===0) return;
+  const info=analyze(currentGrid, OPT);
+  for(const it of info.instances){
+    if(it.sym===sym) pins.delete(it.anchor[0]*9+it.anchor[1]);
+  }
+}
+
 /* ---------- actions ---------- */
 function optimizeNow(){
   if(optimizing)return;optimizing=true;
@@ -1082,8 +1291,9 @@ function optimizeNow(){
   if(tilesUsed()>81){alert('Selection exceeds the 81-tile plot. Remove some crops.');optimizing=false;return;}
   document.getElementById('optimizeBtn').textContent='Optimizing…';
   setTimeout(()=>{
-    const [g,b]=optimizeSynergy(selection,fill,12000,OPT);
-    if(!g){alert("Couldn't fit the selected crops — reduce the big ones.");}
+    const pinList=pinsFromGrid();
+    const [g,b]=optimizeSynergy(selection,fill,12000,OPT,pinList);
+    if(!g){alert("Couldn't fit the selected crops — reduce the big ones, or the pinned crops take too much space.");}
     else{currentGrid=g;}
     document.getElementById('optimizeBtn').textContent='⚙ Optimize arrangement';
     clearStale();
@@ -1114,8 +1324,11 @@ function copyAisenLink(){
   else fallback();
 }
 document.getElementById('optimizeBtn').onclick=optimizeNow;
-document.getElementById('clearBtn').onclick=()=>{selection={};currentGrid=null;render();};
+document.getElementById('clearBtn').onclick=()=>{selection={};currentGrid=null;pins.clear();render();};
 document.getElementById('aisenLinkBtn').onclick=copyAisenLink;
+document.getElementById('importBtn').onclick=importAisen;
+document.getElementById('pinModeToggle').onchange=(e)=>{pinMode=e.target.checked;};
+document.getElementById('clearPinsBtn').onclick=()=>{pins.clear();renderGrid();};
 document.getElementById('fillToggle').onchange=()=>{};
 document.getElementById('preferBigToggle').onchange=(e)=>{OPT.preferBig=e.target.checked;markStale();};
 document.getElementById('objectiveIncome').onchange=()=>{OPT.objective='income';renderBuffOrder();markStale();};
