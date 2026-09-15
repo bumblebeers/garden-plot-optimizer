@@ -1268,23 +1268,41 @@ function openCellInfo(sym,r,c,e){
   }
   // interchangeable crops (same buff & footprint)
   const alts=SYMS.filter(x=>x!==sym&&CROP[x].buff===d.buff&&CROP[x].sz[0]===d.sz[0]&&CROP[x].sz[1]===d.sz[1]);
+  // preview each swap in its real post-swap state: same cells, new crop. A
+  // crop's buffs depend on the neighbour symbols (same-type instances don't
+  // buff each other) and on its own need/fertilizer, so re-run the canonical
+  // analysis on the swapped grid instead of assuming the harvest boost.
   const swapBlock=alts.length
-    ?`<div class="opts">`+alts.map(x=>`<button class="opt" data-s="${x}"><span class="sw" style="background:${CROP[x].color}"></span><span>${CROP[x].name}<div class="lbl">${CROP[x].yld}→${CROP[x].yldB}/harvest · ${(CROP[x].yldB*CROP[x].harv/CROP[x].cycle).toFixed(1)}/day</div></span></button>`).join('')+`</div>`
+    ?`<div class="opts">`+alts.map(x=>{
+      const g2=currentGrid.map(row=>row.slice());
+      for(const k of it.cells){g2[Math.floor(k/9)][k%9]=x;}
+      const i2=analyze(g2,OPT).instances.find(i=>i.cells.includes(r*9+c));
+      const d2=CROP[x],h2=i2.got.H||i2.fert==='H';
+      return `<button class="opt" data-s="${x}"><span class="sw" style="background:${d2.color}"></span><span>${d2.name}<div class="lbl">${h2?d2.yld+' → <b>'+d2.yldB+'</b> boosted':d2.yld}/harvest · ${i2.yd.toFixed(1)}/day</div></span></button>`;
+    }).join('')+`</div>`
     :`<div class="none">No same-buff, same-size alternatives.</div>`;
   const pkey=it.anchor[0]*9+it.anchor[1];
   const isPin=pins.has(pkey);
+  const hasH=it.got.H||it.fert==='H';   // harvest boost actually in effect (neighbours or fertilizer)
   pop.innerHTML=`
     <div class="ttl">${d.name} <span class="lbl">· ${d.sz[0]}×${d.sz[1]}</span>
       <button class="opt" data-pin="1" style="margin-top:4px">📌 ${isPin?'Unpin':'Pin'} this crop</button></div>
-    <div class="kv"><span class="lbl">Yields</span> ${d.yld}${d.yldB!==d.yld?` → <b>${d.yldB}</b> boosted`:''} /harvest · ≈${it.yd.toFixed(1)}/day</div>
+    <div class="kv"><span class="lbl">Yields</span> ${hasH?d.yld+' → <b>'+d.yldB+'</b> boosted':d.yld} /harvest · ≈${it.yd.toFixed(1)}/day</div>
     <div class="kv"><span class="lbl">Cycle</span> ${cycleText(d)}</div>
     <div class="sect"><div class="ttl">Buffs received</div>${recv}</div>
     <div class="sect"><div class="ttl">Provides</div><div class="kv">${d.buff==='None'?'no buff':BUFFNAME[d.buff]}</div></div>
     <div class="sect"><div class="ttl">Fertilizer</div><div class="kv">${fert}</div></div>
     <div class="sect"><div class="ttl">Swap for — same buff &amp; size</div>${swapBlock}</div>`;
   pop.style.display='block';
-  pop.style.left=Math.min(e?e.clientX:80,window.innerWidth-300)+'px';
-  pop.style.top=Math.min(e?e.clientY:80,window.innerHeight-380)+'px';
+  // place at the click, then clamp with the popup's real measured size — it is
+  // 308px wide and grows with buff/swap content, so the old fixed clamps
+  // (innerWidth-300 / innerHeight-380) could leave the right edge past the
+  // viewport and the bottom off-screen with no way to reach it.
+  const rect=pop.getBoundingClientRect(),M=8;
+  const px=Math.min(Math.max(e?e.clientX:80,M),Math.max(M,window.innerWidth-rect.width-M));
+  const py=Math.min(Math.max(e?e.clientY:80,M),Math.max(M,window.innerHeight-rect.height-M));
+  pop.style.left=px+'px';
+  pop.style.top=py+'px';
   pop.querySelectorAll('.opt').forEach(btn=>btn.onclick=()=>{
     if(btn.dataset.pin){
       togglePin(r,c);
