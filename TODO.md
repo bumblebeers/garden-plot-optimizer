@@ -27,11 +27,36 @@ loads the exact layout (crops + per-crop fertilizer) in Aisen's planner.
 - The button lives in `index.html`; the link is copied to the clipboard (with a
   `execCommand`/`prompt` fallback for `file://`).
 
+### DONE — import from Aisen
+
+An **Import** field accepts an Aisen save link or code (`?layout=<code>`) and
+loads the layout into the grid and the crop-selection menu, including a
+*partially finished* plot.
+
+- `decodeAisen(code)` in `src/garden.js` parses an Aisen v0.5 save code back into
+  our 9×9 grid (crops + fertilizer grid + level / star-seed settings). It is the
+  inverse of `encodeAisen` and the mirror of Aisen's own `expandPlotCode` +
+  `GardenGridBasic.placeCrop`.
+- Handles Aisen's **trimmed** dimensions (`D-WxH` smaller than 9×9, from
+  `trimGarden`) and partially filled plots (empty tiles stay empty). A
+  partially finished plot is accepted through `validateLayout` as the gate.
+- Round-trip and hand-written-code tests in `test/import.test.js`.
+
+### DONE — pin crops
+
+A **Pin mode** toggle (and a 📌 button in a tile's detail card) locks a crop at
+its exact position; the optimizer keeps pinned crops fixed and fills /
+hill-climbs the rest of the plot around them.
+
+- `optimizeSynergy(selection, fill, iters, opts, pins?)` and `buildGrid(selection,
+  pins?)` take an optional `pins` array of `{ sym, r, c }` anchors. Pinned crops
+  are placed first, marked immutable in the `user` mask, and never moved.
+- Tests in `test/pin.test.js` verify pinned crops stay at their anchors, that a
+  pinned crop's symbol is excluded from the autofill pools, and that
+  overlapping / out-of-bounds pins are rejected.
+
 ### NOT started
 
-- **Import an Aisen code back into the editor** — read `?layout=...` on load and
-  decode Aisen's v0.5 code into our grid (through `validateLayout` as the gate),
-  so Aisen share links round-trip into our tool.
 - **Our own codec** — a versioned `v1_<...>` format (rather than Aisen's), so
   links that stay inside our tool don't depend on Aisen's undocumented format.
 - **Community examples** — "Load community example" for reference layouts (Aisen's
@@ -40,6 +65,7 @@ loads the exact layout (crops + per-crop fertilizer) in Aisen's planner.
 ### Notes / decisions
 
 - Our type checker (`validateLayout`) is the natural gate on any import — reuse it.
-- Aisen's codec is custom and undocumented; being compatible with it is now only
-  needed for the *export* direction (done), not for our own import codec.
+- Aisen's codec is custom and undocumented; being compatible with it is needed for
+  both the *export* direction (done) and the *import* direction (done); our own
+  import codec is not required for links that stay inside our tool.
 

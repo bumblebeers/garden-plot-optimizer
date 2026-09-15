@@ -321,12 +321,33 @@
     const need = CROP[sym].need;
     return Object.values(cnt).filter(x => x >= need).length;
   }
-  function buildGrid(selection) {
+  /* Build a 9x9 grid for a selection, placing any pinned crops first at their
+   * exact anchors. Pinned cells are marked in `user` so the fill/hill-climb
+   * never moves them. `pins` is an array of { sym, r, c } anchors (top-left
+   * tile of each pinned crop); it is optional. Returns null if a pin cannot be
+   * placed (overlap / out of bounds) or the remaining selection cannot fit. */
+  function buildGrid(selection, pins) {
     const grid = Array.from({ length: 9 }, () => Array(9).fill(null));
     const user = Array(81).fill(false);
+    const pinCounts = {};
+    if (pins) {
+      for (const p of pins) {
+        const h = CROP[p.sym].sz[0], w = CROP[p.sym].sz[1];
+        if (p.r + h > 9 || p.c + w > 9) return null;
+        for (let dr = 0; dr < h; dr++) for (let dc = 0; dc < w; dc++) {
+          if (grid[p.r + dr][p.c + dc] != null) return null;
+        }
+        for (let dr = 0; dr < h; dr++) for (let dc = 0; dc < w; dc++) {
+          grid[p.r + dr][p.c + dc] = p.sym;
+          user[(p.r + dr) * 9 + p.c + dc] = true;
+        }
+        pinCounts[p.sym] = (pinCounts[p.sym] || 0) + 1;
+      }
+    }
     const order = SYMS.filter(s => selection[s] > 0).sort((a, b) => CROP[b].sz[0] * CROP[b].sz[1] - CROP[a].sz[0] * CROP[a].sz[1]);
     for (const sym of order) {
-      for (let k = 0; k < selection[sym]; k++) {
+      const remaining = (selection[sym] || 0) - (pinCounts[sym] || 0);
+      for (let k = 0; k < remaining; k++) {
         const h = CROP[sym].sz[0], w = CROP[sym].sz[1];
         const cands = [];
         for (let r = 0; r <= 9 - h; r++) for (let c = 0; c <= 9 - w; c++) if (canPlace(grid, sym, r, c)) {
@@ -423,8 +444,14 @@
     }
     return [bg, best];
   }
-  function optimizeSynergy(selection, fill, iters, opts) {
+  /* `pins` is an optional array of { sym, r, c } crops that must stay at their
+   * exact anchors. The optimizer places them first (immutable), then places the
+   * remaining selection around them, then fills/hill-climbs the free space. A
+   * pinned crop's symbol is added to the selection set so the autofill pools
+   * never re-insert it. */
+  function optimizeSynergy(selection, fill, iters, opts, pins) {
     const sel = new Set(SYMS.filter(s => selection[s] > 0));
+    if (pins) for (const p of pins) sel.add(p.sym);
     let f1 = FILL.filter(s => !sel.has(s)); if (!f1.length) f1 = FILL.slice();
     let f2 = PROVIDERS.filter(s => !sel.has(s)); if (!f2.length) f2 = PROVIDERS.slice();
     if (opts.preferBig) {
@@ -435,7 +462,7 @@
     const restarts = fill ? 10 : 1;
     let bestg = null, bestsc = -1;
     for (let k = 0; k < restarts; k++) {
-      const r = buildGrid(selection);
+      const r = buildGrid(selection, pins);
       if (!r) return [null, 0];
       let g = r.grid;
       const user = r.user;
@@ -626,6 +653,91 @@
     return settings ? code + '_' + settings : code;
   }
 
+  /* ---------- Aisen import codec ----------
+   * Decode an Aisen v0.5 save code (the `?layout=` value from palia-tools) back
+   * into our 9x9 grid. This is the inverse of encodeAisen and the mirror of
+   * Aisen's own `expandPlotCode` + `GardenGridBasic.placeCrop`. Aisen writes a
+   * crop only at its start (top-left) tile; every other tile of its footprint is
+   * 'N', so we reconstruct the full footprint from the start tile.
+   *
+   * A "partially finished" plot is one with empty ('N') tiles — the 9x9 grid is
+   * left with null cells there, which validateLayout and the app both accept.
+   * Returns { grid, fertGrid, level, starSeeds }.
+   */
+  const AISEN_FERT_REV = { H: 'H', Q: 'Q', Y: 'W', W: 'N' };
+
+  /* Run-length decode a plot's compressed tile string (Aisen's expandPlotCode). */
+  function expandPlotCode(code) {
+    const tokens = code.match(/[A-Z][a-z]*(?:\.[A-Z][a-z]*)?\d*/g) || [];
+    const out = [];
+    for (const token of tokens) {
+      const m = token.match(/^([A-Z][a-z]*(?:\.[A-Z][a-z]*)?)(\d*)$/);
+      if (!m) continue;
+      const count = m[2] ? parseInt(m[2], 10) : 1;
+      for (let i = 0; i < Math.min(count, 1000); i++) out.push(m[1]);
+    }
+    return out;
+  }
+
+  /* Decode an Aisen v0.5 save code into a 9x9 grid. Throws with a readable
+   * message on an unsupported version, malformed section, unknown crop code,
+   * overlapping/out-of-bounds crop, or a plot dimension other than 9x9. */
+  function decodeAisen(code) {
+    if (typeof code !== 'string' || !code) throw new Error('Empty Aisen save code');
+    const parts = code.split('_');
+    const version = (parts[0] || '').replace(/^v/, '');
+    if (version !== '0.5') throw new Error(`Unsupported Aisen save version '${version || '(none)'}' (only 0.5 is supported)`);
+    const dimension = parts[1] || '';
+    const cropInfo = parts[2] || '';
+    const settings = parts.slice(3).join('_');
+    // Aisen trims empty edge rows/columns (trimGarden), so a partially finished
+    // plot can have a dimension smaller than 9x9 (e.g. D-3x3, D-9x3). Accept any
+    // WxH; crops are placed into our 9x9 grid at their (trimmed) coordinates and
+    // are rejected if they would extend past the 9x9 plot.
+    const dm = dimension.match(/^D-(\d+)x(\d+)$/);
+    if (!dm) throw new Error(`Invalid Aisen dimension '${dimension}'`);
+    const plots = cropInfo.split('-');
+    if (plots[0] !== 'CR') throw new Error('Invalid Aisen crop section');
+    const rev = Object.fromEntries(Object.entries(AISEN_CROP).map(([s, c]) => [c, s]));
+    const grid = Array.from({ length: 9 }, () => Array(9).fill(null));
+    const fertGrid = Array.from({ length: 9 }, () => Array(9).fill(null));
+    const filled = new Set();
+    for (const p of plots.slice(1)) {
+      const m = p.match(/^(\d+)x(\d+)(.*)$/);
+      if (!m) throw new Error(`Invalid Aisen plot '${p}'`);
+      const px = +m[1], py = +m[2];
+      if (px > 9 || py > 9) throw new Error(`Aisen plot at ${px}x${py} is out of bounds`);
+      const tiles = expandPlotCode(m[3]);
+      if (tiles.length !== 9) throw new Error(`Aisen plot ${px}x${py} must decode to 9 tiles (got ${tiles.length})`);
+      for (let i = 0; i < 9; i++) {
+        const r = py + Math.floor(i / 3), c = px + (i % 3);
+        if (r >= 9 || c >= 9) throw new Error(`Aisen tile at ${r},${c} is out of bounds`);
+        const key = r * 9 + c;
+        if (filled.has(key)) continue;
+        const tm = tiles[i].match(/^([A-Z][a-z]*)(?:\.([A-Z][a-z]*))?$/);
+        if (!tm) throw new Error(`Invalid Aisen tile '${tiles[i]}'`);
+        const cropCode = tm[1], fertCode = tm[2] || null;
+        if (cropCode === 'N') { filled.add(key); continue; }
+        const sym = rev[cropCode];
+        if (!sym) throw new Error(`Unknown Aisen crop code '${cropCode}'`);
+        const [h, w] = CROP[sym].sz;
+        if (r + h > 9 || c + w > 9) throw new Error(`${CROP[sym].name} at ${r},${c} exceeds the 9x9 plot`);
+        for (let dr = 0; dr < h; dr++) for (let dc = 0; dc < w; dc++) {
+          const rr = r + dr, cc = c + dc;
+          if (grid[rr][cc] != null) throw new Error(`Overlapping crops at ${rr},${cc}`);
+          grid[rr][cc] = sym;
+          filled.add(rr * 9 + cc);
+        }
+        if (fertCode) fertGrid[r][c] = AISEN_FERT_REV[fertCode] || fertCode;
+      }
+    }
+    // settings: L<level> (gardening level), Nss (star seeds OFF; Aisen defaults ON)
+    const levelMatch = settings.match(/L(\d+)/);
+    const level = levelMatch ? +levelMatch[1] : null;
+    const starSeeds = !settings.includes('Nss');
+    return { grid, fertGrid, level, starSeeds };
+  }
+
   return {
     CROP, SYMS, FILL, PROVIDERS, FERTBUFFS, GROUPS, RANK_W, DEFAULT_OPT,
     groupSyms, initShares, shareOf, cropBias, buffWeights, makeOpts, normalizeBuffOrder, starChanceOf,
@@ -636,5 +748,6 @@
     getAnchors, hillfill, optimizeSynergy,
     harvestSchedule, cycleText, simulate,
     encodeAisen, AISEN_CROP, AISEN_FERT,
+    decodeAisen, expandPlotCode, AISEN_FERT_REV,
   };
 });

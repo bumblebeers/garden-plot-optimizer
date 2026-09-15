@@ -45,6 +45,18 @@ and footprint) with their yield comparison. A stats area shows income, **total
 produced per day** (whole-plot items/day), per-class fertilizer use, buff
 coverage, and **Yield per day** broken down per crop.
 
+**Import from Aisen.** An **Import** field accepts an Aisen save link or code
+(`https://palia-garden-planner.vercel.app/?layout=<code>`) and loads the layout
+into both the grid and the crop-selection menu — including a *partially finished*
+plot (empty tiles stay empty; Aisen's trimmed `D-WxH` dimensions are handled).
+The imported gardening level and star-seed setting are applied to Preferences.
+
+**Pin crops.** A **Pin mode** toggle (or the 📌 button in a tile's detail card)
+locks a crop at its exact position. When you then hit **Optimize**, pinned crops
+never move — the optimizer fills and hill-climbs the rest of the plot around them.
+Unpin crops (individually or all) and regenerate to let the freed crops move to a
+more optimal spot while the still-pinned ones keep their locations.
+
 **Share to Aisen.** A **Copy Aisen link** button encodes the current layout into
 Aisen's Palia Garden Planner v0.5 save code and copies a
 `https://palia-garden-planner.vercel.app/?layout=<code>` URL. Opening the link
@@ -65,11 +77,18 @@ The tests exercise exactly what the app computes:
 - **`simulate(grid, opts, horizon)`** — runs a validated layout forward and
   returns both the analytic steady-state yield and a day-by-day simulation that
   accumulates actual harvests, so the two can be cross-checked.
-- **`optimizeSynergy(...)`** — the placement/optimizer, parameterised by options.
+- **`optimizeSynergy(selection, fill, iters, opts, pins?)`** — the
+  placement/optimizer, parameterised by options; an optional `pins` array of
+  `{ sym, r, c }` anchors keeps those crops fixed at their exact positions while
+  the rest of the plot is optimized around them.
 - **`encodeAisen(grid, opts)`** — serializes a 9×9 layout into Aisen's Palia
   Garden Planner v0.5 save code (crops + per-crop fertilizer), for the **Copy
   Aisen link** button. A round-trip test in `test/export.test.js` decodes the
   output with a faithful replica of Aisen's own `expandPlotCode`/plot loader.
+- **`decodeAisen(code)`** — the inverse codec, for the **Import** field: parses
+  an Aisen v0.5 save code (including a partial / trimmed `D-WxH` plot) back into
+  our 9×9 grid, fertilizer grid, and the level / star-seed settings. Tests in
+  `test/import.test.js` pin it against hand-written codes and round-trips.
 - `CROP` / `SYMS` / etc. — crop data and the yield model (a single source of
   truth for both app and tests).
 
@@ -124,7 +143,7 @@ the apple needs — which the optimizer then corrects by surrounding the apple w
 Harvest providers.
 
 ```sh
-npm test                # 55 tests: type checker, simulator, data, full app, Aisen export
+npm test                # 71 tests: type checker, simulator, data, full app, Aisen export/import, pins
 npm run verify          # optimizer vs random-valid-layouts harness -> reports/
 ```
 
