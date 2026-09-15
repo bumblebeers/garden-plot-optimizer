@@ -58,9 +58,8 @@
   // HydratePro 1, WeedBlock 1. Full benefit consumes 1 fertilizer per day per tile.
   const FERT_PRICE = { H: 5, Q: 2, W: 1, N: 1 };
   const GROUPS = ['H', 'Q', 'W', 'N', 'None'];
-  // buff weights are a small bonus so net income dominates the objective; Harvest
-  // and Quality already boost income directly (via yield/star chance), so these
-  // reward the convenience buffs (Water Retain / Weed Block) and break ties.
+  // Rank weights for the buff-priority order (the first-ranked buff gets
+  // RANK_W[0]), used by the yield objective's coverage tie-break — see TIEBREAK.
   const RANK_W = [3, 2, 1, 1];
 
   const DEFAULT_OPT = {
@@ -73,12 +72,14 @@
     level: 0,                                      // Gardening level (star chance scales +2%/level)
     starSeeds: false,                              // use star-quality seeds (+25% base star chance)
   };
-  // Tie-breaker scale per objective. For 'income' the primary is net gold/day
-  // (hundreds), so the buff/pref terms keep their raw weight. For 'yield' the
-  // primary is items/day (tens), so the same raw weights would dominate the
-  // search — scale them down to stay a small tie-breaker that never overrides a
-  // real difference in items/day.
-  const TIEBREAK = { income: 1, yield: 0.02 };
+  // Buff-coverage tie-breaker scale per objective. Under 'income' there is none:
+  // Harvest Boost and Quality Boost already pay through the primary (gross
+  // gold), and Water Retain / Weed Block pay nothing, so a coverage bonus could
+  // only trade real income away for a gold-free convenience. Under 'yield' the
+  // primary is items/day (tens) and is blind to Quality / Water / Weed, so the
+  // ranked coverage bonus is how the user's buff priority expresses itself —
+  // scaled down so it never overrides a real difference in items/day.
+  const TIEBREAK = { income: 0, yield: 0.02 };
   const PREFSCALE = { income: 0.1, yield: 0.002 };
   /* Community star-chance model (Aisen's Palia Garden Planner, cited by the wiki):
    * base = 0.25 + (starSeeds ? 0.25 : 0) + level*0.02 ; Quality Boost adds +0.5, capped at 1.0.
@@ -139,6 +140,46 @@
     return w;
   }
 
+  /* Gross gold/day for one crop instance in a given buff state. The single place
+   * the units -> gold formula lives: analyzeLayout and the fertiliser chooser
+   * both go through it. Star quality is probabilistic; Quality Boost raises the
+   * chance, not to 100%. */
+  function instanceGross(d, hasH, hasQ, opts) {
+    const units = hasH ? d.yldB : d.yld;
+    const starChance = starChanceOf(opts, hasQ);
+    const expectedValue = d.pv * (1 + starChance * 0.5); // pv*(1-s) + pv*1.5*s
+    return units * d.harv * expectedValue / d.cycle;
+  }
+
+  /* Pick one crop instance's fertiliser class. The objective decides; the user's
+   * buff priority only breaks ties:
+   *   income — Harvest Boost and Quality Up are the only classes that can pay:
+   *            each is taken only where its buff raises the harvest value by more
+   *            than its price per tile per day. Water Retain / Weed Block leave
+   *            the harvest value untouched and cost gold, so they are never
+   *            bought, and a buff the crop already receives from its neighbours
+   *            cannot be bought either.
+   *   yield  — Harvest Boost is the only class that raises items/day, so it is
+   *            bought wherever it is missing and allowed; otherwise the first of
+   *            Quality / Water / Weed in the user's priority order is (the
+   *            score's coverage tie-break is what makes that worth doing — see
+   *            TIEBREAK). */
+  function chooseFertilizer(d, tiles, got, opts) {
+    const order = effectiveBuffOrder(opts);
+    if (opts.objective === 'yield') {
+      for (const b of order) if (FERTBUFFS.includes(b) && !got[b] && opts.fert[b]) return b;
+      return 'None';
+    }
+    let best = null, bestVal = -Infinity;
+    for (const b of order) {
+      if ((b !== 'H' && b !== 'Q') || !opts.fert[b] || got[b]) continue;
+      const v = instanceGross(d, got.H || b === 'H', got.Q || b === 'Q', opts) - tiles * FERT_PRICE[b];
+      if (v > bestVal + 1e-9) { best = b; bestVal = v; }
+    }
+    if (best === null) return 'None';
+    return bestVal > instanceGross(d, got.H, got.Q, opts) + 1e-9 ? best : 'None';
+  }
+
   /* ---------- instance identification (lenient, matches app display) ----------
    * Scans the grid top-left; a crop whose footprint block is complete becomes a
    * full instance, otherwise it is treated as a 1x1 fragment. This is how the
@@ -191,17 +232,15 @@
       }
       const got = { H: cnt.H >= d.need, Q: cnt.Q >= d.need, W: cnt.W >= d.need, N: cnt.N >= d.need };
       if (got.H) Hc++; if (got.Q) Qc++; if (got.W) Wc++; if (got.N) Nc++;
-      let fb = 'None';
-      for (const b of effectiveBuffOrder(opts)) if (FERTBUFFS.includes(b) && !got[b] && opts.fert[b]) { fb = b; break; }
+      const tiles = d.sz[0] * d.sz[1];
+      // the objective picks the class — income: whichever pays most; yield:
+      // Harvest Boost when missing, else the user's buff priority
+      const fb = chooseFertilizer(d, tiles, got, opts);
       const hasH = got.H || fb === 'H', hasQ = got.Q || fb === 'Q';
       const units = (hasH ? d.yldB : d.yld);
-      // star quality is probabilistic; Quality Boost raises the chance, not to 100%
-      const starChance = starChanceOf(opts, hasQ);
-      const expectedValue = d.pv * (1 + starChance * 0.5); // pv*(1-s) + pv*1.5*s
       const yd = units * d.harv / d.cycle;                 // units/day
       yieldTotal += yd;
-      const gross = units * d.harv * expectedValue / d.cycle;   // gross gold/day
-      const tiles = d.sz[0] * d.sz[1];
+      const gross = instanceGross(d, hasH, hasQ, opts);    // gross gold/day
       // seed cost = the seed's gold SELL value (opportunity cost), star seed if
       // starSeeds is enabled; matches the community (Aisen) convention.
       const useStar = opts.starSeeds != null ? opts.starSeeds : DEFAULT_OPT.starSeeds;
@@ -232,13 +271,17 @@
   }
   function scoreTotal(grid, opts) {
     const s = scoreFull(grid, opts);
-    const w = buffWeights(opts);
     const objective = opts.objective === 'yield' ? 'yield' : 'income';
     const primary = objective === 'yield' ? s.yield : s.income;
     // the crop-mix bias is applied only when the user wants it; otherwise the
     // optimizer is free to pick the crop mix purely on the objective
     const prefTerm = opts.cropMix === false ? 0 : PREFSCALE[objective] * s.pref;
-    const buffTerm = TIEBREAK[objective] * (w.H * s.H + w.Q * s.Q + w.W * s.W + w.N * s.N);
+    // ranked coverage bonus — yield objective only, see TIEBREAK
+    let buffTerm = 0;
+    if (TIEBREAK[objective]) {
+      const w = buffWeights(opts);
+      buffTerm = TIEBREAK[objective] * (w.H * s.H + w.Q * s.Q + w.W * s.W + w.N * s.N);
+    }
     return primary + buffTerm + prefTerm;
   }
 
@@ -324,9 +367,15 @@
   /* Build a 9x9 grid for a selection, placing any pinned crops first at their
    * exact anchors. Pinned cells are marked in `user` so the fill/hill-climb
    * never moves them. `pins` is an array of { sym, r, c } anchors (top-left
-   * tile of each pinned crop); it is optional. Returns null if a pin cannot be
-   * placed (overlap / out of bounds) or the remaining selection cannot fit. */
-  function buildGrid(selection, pins) {
+   * tile of each pinned crop); it is optional. `policy` picks how each crop's
+   * position is chosen when several fit:
+   *   'buff'     (default) the placement that satisfies the most neighbour buffs,
+   *              random among ties — the best starting point for the hill-climb;
+   *   'firstfit' the top-left-most legal anchor (a tight first-fit packing);
+   *   'random'   uniform among the legal anchors (a spread packing).
+   * Returns null if a pin cannot be placed (overlap / out of bounds) or the
+   * remaining selection cannot fit. */
+  function buildGrid(selection, pins, policy) {
     const grid = Array.from({ length: 9 }, () => Array(9).fill(null));
     const user = Array(81).fill(false);
     const pinCounts = {};
@@ -350,15 +399,22 @@
       for (let k = 0; k < remaining; k++) {
         const h = CROP[sym].sz[0], w = CROP[sym].sz[1];
         const cands = [];
+        let mx = -1;
         for (let r = 0; r <= 9 - h; r++) for (let c = 0; c <= 9 - w; c++) if (canPlace(grid, sym, r, c)) {
-          const cells = [];
-          for (let dr = 0; dr < h; dr++) for (let dc = 0; dc < w; dc++) cells.push((r + dr) * 9 + c + dc);
-          cands.push([r, c, localBuff(grid, sym, cells)]);
+          let v = 0;                       // 'firstfit' / 'random' do not rank candidates
+          if (policy !== 'firstfit' && policy !== 'random') {
+            const cells = [];
+            for (let dr = 0; dr < h; dr++) for (let dc = 0; dc < w; dc++) cells.push((r + dr) * 9 + c + dc);
+            v = localBuff(grid, sym, cells);
+          }
+          if (v > mx) mx = v;
+          cands.push([r, c, v]);
         }
         if (!cands.length) return null;
-        const mx = Math.max(...cands.map(x => x[2]));
-        const top = cands.filter(x => x[2] === mx);
-        const p = top[Math.floor(Math.random() * top.length)];
+        let p;
+        if (policy === 'firstfit') p = cands[0];                                        // row-major: top-left-most
+        else if (policy === 'random') p = cands[Math.floor(Math.random() * cands.length)];
+        else { const top = cands.filter(x => x[2] === mx); p = top[Math.floor(Math.random() * top.length)]; }
         for (let dr = 0; dr < h; dr++) for (let dc = 0; dc < w; dc++) { grid[p[0] + dr][p[1] + dc] = sym; user[(p[0] + dr) * 9 + p[1] + dc] = true; }
       }
     }
@@ -459,11 +515,32 @@
       const reduced = f1.filter(s => !bigBuffs.has(CROP[s].buff));
       if (reduced.length) f1 = reduced;
     }
-    const restarts = fill ? 10 : 1;
-    let bestg = null, bestsc = -1;
-    for (let k = 0; k < restarts; k++) {
+    // Placement. buildGrid is a randomised greedy placer, so a single attempt can
+    // fail — or pack differently — by chance even when the selection fits. A
+    // failed attempt costs ~0.1 ms, so instead of calling a run unfittable while
+    // packings go untried, the search keeps trying until it has `restarts`
+    // packings to hill-climb. The tail of tight multi-species mixes packs on
+    // ~1-2% of tries, so `maxTries` is sized against the worst rate measured
+    // (~1.3%): 1200 tries puts a false refusal below 1 in 10^6 there, and costs
+    // at most ~0.13 s on a selection that is genuinely unfittable (which pays it
+    // before reporting that). Only when every one of those tries fails does one
+    // systematic first-fit placement get a turn — a complementary policy,
+    // measured to pack mixes the buff-seeking placement never finds.
+    const restarts = 10;
+    const maxTries = 1200;
+    const placed = [];
+    for (let k = 0; k < maxTries && placed.length < restarts; k++) {
       const r = buildGrid(selection, pins);
+      if (r) placed.push(r);
+    }
+    if (!placed.length) {
+      const r = buildGrid(selection, pins, 'firstfit');
       if (!r) return [null, 0];
+      placed.push(r);
+    }
+    // Hill-climb every packing; the iters budget is split across the restarts.
+    let bestg = null, bestsc = -Infinity;
+    for (const r of placed) {
       let g = r.grid;
       const user = r.user;
       if (fill) {
@@ -475,7 +552,7 @@
         if (s > bestsc) { bestsc = s; bestg = g; }
       }
     }
-    return [bestg, bestsc];
+    return bestg ? [bestg, bestsc] : [null, 0];
   }
 
   /* ---------- harvest schedule (forward simulation) ---------- */

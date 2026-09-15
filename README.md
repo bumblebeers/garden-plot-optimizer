@@ -22,15 +22,20 @@ the 14 autofill crops.
 
 - **Fertilizer, opt-in per class** — HarvestBoost / QualityUp / HydratePro /
   WeedBlock. Only the enabled classes are assumed; the layout adapts accordingly.
+  Under **Net income** only HarvestBoost and QualityUp can ever pay for
+  themselves, so HydratePro / WeedBlock are never bought there (they cost gold
+  and change neither yield nor star chance).
 - **Optimise for** — **Net income /day** or **Crops per day (items)**. The income
   objective maximises net gold/day (the default); the yield objective maximises
   the total number of harvested items per day, ignoring seed/fertilizer cost.
 - **Prefer 2×2 crops** — fewer, larger plants for less upkeep (some income cost).
-- **Buff priority** — under **Crops per day**, **Harvest Boost is locked to the
-  top spot** (it is the only buff that raises yield/items directly) and you
-  reorder Quality, Water-retain and Weed-block below it; under **Net income** the
-  order is fully user-configurable. Rank the low-maintenance buffs first for an
-  easy garden.
+- **Buff priority** — ranks the buffs. Under **Net income** each crop's
+  fertiliser is chosen by what pays most (HarvestBoost for essentially every
+  crop), so this order only breaks exact ties; under **Crops per day**,
+  **Harvest Boost is locked to the top spot** (it is the only buff that raises
+  yield/items directly) and the rest of the order picks which convenience buff
+  the layout buys where the item count cannot tell them apart. Rank the
+  low-maintenance buffs first for an easy garden.
 - **Crop mix** — tick to use the per-buff crop-mix donuts below; untick to let the
   optimizer pick the crop mix purely on the objective.
 - **Autofill crop mix per buff** — a donut per buff group; drag the dividers to
@@ -85,7 +90,10 @@ The tests exercise exactly what the app computes:
 - **`optimizeSynergy(selection, fill, iters, opts, pins?)`** — the
   placement/optimizer, parameterised by options; an optional `pins` array of
   `{ sym, r, c }` anchors keeps those crops fixed at their exact positions while
-  the rest of the plot is optimized around them.
+  the rest of the plot is optimized around them. Placement is a randomised
+  greedy placer, so it retries until it has its full quota of packings to
+  hill-climb (a failed attempt costs ~0.1 ms) — a feasible selection is reported
+  unfittable only after the retries, and a final first-fit fallback, all fail.
 - **`encodeAisen(grid, opts)`** — serializes a 9×9 layout into Aisen's Palia
   Garden Planner v0.5 save code (crops + per-crop fertilizer), for the **Copy
   Aisen link** button. A round-trip test in `test/export.test.js` decodes the
@@ -121,20 +129,22 @@ QualityUp 2, HydratePro 1, WeedBlock 1) and assume full benefit = 1 fertilizer
 consumed per day per tile, per the wiki.
 
 The **optimizer maximises net income by default**, with a toggle to instead
-maximise **crops per day** (total harvested items/day). The buff priority order is
-fully user-configurable under the income objective; under the yield objective
-Harvest Boost is locked to the top-ranked buff spot (it is the only buff that
-raises yield/items directly) and the user reorders Quality / Water-retain /
-Weed-block below it. Under the income objective, Harvest Boost and Quality Boost
-boost value directly, so they emerge from the search; Water Retain / Weed Block
-coverage (convenience, not gold) and the crop-mix preference are kept as a small
-tie-breaker. Under the yield objective the primary term is items/day (Harvest
-Boost emerges because it ×1.5's the count), with the convenience buffs and crop-mix
-kept as a much smaller tie-breaker. When the **crop mix** toggle is off, the
-crop-mix bias is dropped entirely and the optimizer picks the mix purely on the
-objective. This is why our income figure is directly comparable to the
-community's profit-based numbers (Aisen's planner and the r/Palia cost-and-earnings
-charts), rather than a gross upper bound.
+maximise **crops per day** (total harvested items/day). Each crop's fertiliser is
+chosen by the objective, not by a fixed rule: under the income objective the model
+buys the class that pays most for that crop — what the buff adds to the harvest
+value against its price per tile per day — which is HarvestBoost for essentially
+every crop and leaves Water Retain / Weed Block unbought, since they add no gold.
+Under the yield objective only Harvest Boost changes the item count, so the buff
+priority order decides which convenience buff the layout buys where the count
+cannot; Harvest Boost is locked to the top-ranked spot there (it is the only buff
+that raises yield/items directly) and the user reorders Quality / Water-retain /
+Weed-block below it. The income score is the net income figure itself plus, when
+the **crop mix** toggle is on, the crop-mix bias; with the toggle off the optimizer
+ranks by net income alone. The yield score is items/day plus a much smaller ranked
+coverage tie-break (the convenience buffs, which items/day is blind to). This is
+why our income figure is directly comparable to the community's profit-based
+numbers (Aisen's planner and the r/Palia cost-and-earnings charts), rather than a
+gross upper bound.
 
 The stats read like the community tools (Aisen's Palia Garden Planner,
 paliaguide): buffs are shown by name (**Harvest Boost / Quality Boost / Water

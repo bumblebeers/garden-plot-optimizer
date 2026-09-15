@@ -88,6 +88,34 @@ test('optimizer returns null when the selection cannot fit the plot', () => {
   assert.strictEqual(g, null);
 });
 
+// seeded PRNG, so a run that depends on placement luck is still deterministic
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+test('a placement attempt that fails does not abort the run (feasible selection)', () => {
+  // A tight 10-crop mix that exactly fills the plot. Buff-seeking placement packs
+  // it on ~2% of tries, so the first attempt almost always dead-ends — aborting
+  // there is what used to make the app tell the user to remove crops. Every
+  // systematic placement policy dead-ends on it too, so only the retries place it.
+  const sel = { S: 3, p: 1, B: 3, P: 5, F: 3, A: 2, n: 2, r: 2, t: 1, T: 1 };
+  const realRandom = Math.random;
+  Math.random = mulberry32(1);
+  try {
+    const [g, score] = optimizeSynergy(sel, true, 1500, makeOpts());
+    assert.ok(g, 'a selection that fits must not report "couldn\'t fit"');
+    assert.strictEqual(validateLayout(g).valid, true, 'the retried layout is a valid packing');
+    assert.ok(score > 0, 'the retried layout is scored');
+  } finally {
+    Math.random = realRandom;
+  }
+});
+
 test('optimizer claimed income equals the simulator analytic income', () => {
   const opts = makeOpts();
   const sel = { r: 6, F: 1 };
