@@ -6,36 +6,40 @@ and have not been started unless marked.
 ## Shareable / importable layout codes
 
 Aisen's Palia Garden Planner (the tool the official wiki links) lets users share a
-full garden layout as a compact URL (e.g. `?layout=v0.2_DIM-111-111-111_CROPS-...`),
-which is a big part of how the community exchanges and compares layouts. Our tool
-has no equivalent, which makes it harder to drop into the existing community flow.
+full garden layout as a compact URL (`?layout=...`), which is a big part of how the
+community exchanges and compares layouts.
 
-**Goal:** a user can export the current plot to a shareable code and import
-someone else's code back into the editor.
+### DONE — export to Aisen
 
-### Sketch
+A **Copy Aisen link** button encodes the current layout into Aisen's Palia Garden
+Planner **v0.5** save code and copies a
+`https://palia-garden-planner.vercel.app/?layout=<code>` URL. Opening the link
+loads the exact layout (crops + per-crop fertilizer) in Aisen's planner.
 
-- **Serialize** — encode a 9×9 grid to a compact string. Aisen uses a
-  `v0.2_DIM-<dims>_CROPS-<rows>` format; we can define our own (e.g. a
-  `v1_<81-char symbol string>_FERT-<81-char fert string>`), but a versioned,
-  human-comparable format is the requirement.
-- **Deserialize** — parse the code back into a grid. On import, run it through
-  `validateLayout` (the type checker) so a bad/edited code is rejected with a
-  clear error rather than silently mis-rendered.
-- **URL param** — read `?layout=...` on load so a shared link opens the exact
-  layout (like Aisen's).
-- **UI** — "Copy layout code" / "Paste layout code" buttons; maybe a "Load
-  community example" for reference layouts (Aisen's example, paliaguide's
-  "Apple Gold Farm").
-- **Fertilizer + options** — the code must also capture per-tile fertilizer
-  (or the fertilizer-assignment is recomputed from the layout by our model) and
-  the options (buff order, star chance, fert toggles) so a shared link reproduces
-  the same result.
+- `encodeAisen(grid, opts)` in `src/garden.js` serializes a 9×9 layout into the
+  Aisen v0.5 format (`0.5_D-9x9_CR-<plot><code>-...[_<settings>]`), mapping our
+  crop symbols and fertilizer buffs onto Aisen's codes and splitting the grid into
+  nine 3×3 plots. `settings` carries `L<level>` and `Nss` (star-seed off).
+- Round-trip tests in `test/export.test.js` decode the output with a faithful
+  replica of Aisen's own `expandPlotCode`/plot loader, and verify it against
+  Aisen's `parseSave`/`validateNewPlotFormat` path (crop/fert codes, 9 tiles per
+  plot, in-bounds).
+- The button lives in `index.html`; the link is copied to the clipboard (with a
+  `execCommand`/`prompt` fallback for `file://`).
 
-### Notes / decisions to make
+### NOT started
 
-- Our type checker (`validateLayout`) is the natural gate on import — reuse it.
-- Aisen's codec is custom and undocumented; we do not need to be compatible with
-  it, but being *close in spirit* (versioned, compact, shareable via URL) is what
-  makes our tool intelligible to the community.
-- This is intentionally deferred to a later session.
+- **Import an Aisen code back into the editor** — read `?layout=...` on load and
+  decode Aisen's v0.5 code into our grid (through `validateLayout` as the gate),
+  so Aisen share links round-trip into our tool.
+- **Our own codec** — a versioned `v1_<...>` format (rather than Aisen's), so
+  links that stay inside our tool don't depend on Aisen's undocumented format.
+- **Community examples** — "Load community example" for reference layouts (Aisen's
+  example, paliaguide's "Apple Gold Farm").
+
+### Notes / decisions
+
+- Our type checker (`validateLayout`) is the natural gate on any import — reuse it.
+- Aisen's codec is custom and undocumented; being compatible with it is now only
+  needed for the *export* direction (done), not for our own import codec.
+

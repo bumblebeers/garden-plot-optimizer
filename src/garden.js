@@ -529,6 +529,103 @@
     };
   }
 
+  /* ---------- Aisen export codec ----------
+   * Aisen's Palia Garden Planner (github.com/VincentAmante/palia-tools) shares a
+   * full layout as a versioned save code in the ?layout= URL param. We encode our
+   * 9x9 layout into that v0.5 format so an optimized layout can be opened directly
+   * in Aisen's planner (https://palia-garden-planner.vercel.app/?layout=<code>).
+   *
+   * Format (from Aisen saveHandler.ts / gardenGrid.ts, version 0.5):
+   *   <version>_D-<W>x<H>_CR-<plot><code>-<plot><code>-...[_<settings>]
+   *   - version    : '0.5'
+   *   - D-<W>x<H>  : total garden size in tiles
+   *   - each plot  : '<startX>x<startY>' + a run-length-compressed 9-tile string
+   *   - each tile  : '<cropCode>' | '<cropCode>.<fertCode>' | 'N' (empty)
+   * A crop is written only at its start (top-left) tile; every other tile of its
+   * footprint is 'N'. We split the 9x9 grid into nine 3x3 plots (0,0)..(6,6).
+   */
+  const AISEN_CROP = {
+    A: 'A',   // Apple
+    F: 'Bt',  // Batterfly Beans
+    B: 'B',   // Blueberry
+    K: 'Bk',  // Bok Choy
+    r: 'C',   // Carrot
+    o: 'Cr',  // Corn
+    t: 'Co',  // Cotton
+    C: 'Cb',  // Napa Cabbage
+    n: 'O',   // Onion
+    p: 'P',   // Potato
+    i: 'R',   // Rice
+    P: 'Pm',  // Rockhopper Pumpkin
+    S: 'S',   // Spicy Pepper
+    T: 'T',   // Tomato
+    w: 'W',   // Wheat
+  };
+  // our fertilizer buff -> Aisen fertiliser code. Aisen codes: H HarvestBoost,
+  // Q QualityUp, Y HydratePro, W WeedBlock. Our 'W' buff is Water Retain
+  // (= HydratePro), our 'N' buff is Weed Block (= WeedBlock).
+  const AISEN_FERT = { H: 'H', Q: 'Q', W: 'Y', N: 'W' };
+
+  /* Run-length compress a plot's 9 tile strings (Aisen's compressPlotString):
+   * consecutive identical tiles collapse to '<tile><count>'. */
+  function compressPlotTiles(tiles) {
+    if (!tiles.length) return '';
+    const out = [];
+    let cur = tiles[0], count = 1;
+    for (let i = 1; i < tiles.length; i++) {
+      if (tiles[i] === cur) count++;
+      else { out.push(cur + (count > 1 ? count : '')); cur = tiles[i]; count = 1; }
+    }
+    out.push(cur + (count > 1 ? count : ''));
+    return out.join('');
+  }
+
+  /* Encode the two settings that affect Aisen's computed numbers and map cleanly:
+   * gardening level (L<n>) and star-seed use. Aisen defaults useStarSeeds to true,
+   * so we only emit 'Nss' when we are NOT using star seeds; the level is emitted
+   * only when non-zero. Omitted when they match Aisen's own defaults. */
+  function aisenSettingsCode(opts) {
+    let s = '';
+    if (opts.level != null && opts.level > 0) s += 'L' + Math.floor(opts.level);
+    const useStar = opts.starSeeds != null ? opts.starSeeds : DEFAULT_OPT.starSeeds;
+    if (!useStar) s += 'Nss';
+    return s;
+  }
+
+  /* Encode a 9x9 layout into Aisen's v0.5 save code. Throws if the grid is not a
+   * valid layout (validateLayout). opts supplies the fertilizer assignment and the
+   * level/star-seed settings. */
+  function encodeAisen(grid, opts) {
+    const o = opts || DEFAULT_OPT;
+    const v = validateLayout(grid);
+    if (!v.valid) throw new Error('Cannot export to Aisen: ' + v.errors.join('; '));
+    const a = analyzeLayout(grid, o);
+    const start = new Map(); // cell index -> { crop, fert }
+    for (const it of a.instances) {
+      const [r, c] = it.anchor;
+      start.set(r * 9 + c, {
+        crop: AISEN_CROP[it.sym],
+        fert: it.fert && it.fert !== 'None' ? AISEN_FERT[it.fert] : null,
+      });
+    }
+    const plots = [];
+    for (let py = 0; py < 9; py += 3) {
+      for (let px = 0; px < 9; px += 3) {
+        const tiles = [];
+        for (let y = 0; y < 3; y++) {
+          for (let x = 0; x < 3; x++) {
+            const s = start.get((py + y) * 9 + (px + x));
+            tiles.push(s ? (s.fert ? s.crop + '.' + s.fert : s.crop) : 'N');
+          }
+        }
+        plots.push(px + 'x' + py + compressPlotTiles(tiles));
+      }
+    }
+    const code = '0.5_D-9x9_CR-' + plots.join('-');
+    const settings = aisenSettingsCode(o);
+    return settings ? code + '_' + settings : code;
+  }
+
   return {
     CROP, SYMS, FILL, PROVIDERS, FERTBUFFS, GROUPS, RANK_W, DEFAULT_OPT,
     groupSyms, initShares, shareOf, cropBias, buffWeights, makeOpts, normalizeBuffOrder, starChanceOf,
@@ -538,5 +635,6 @@
     canPlace, localBuff, buildGrid, cropOverlapsUser, fillInitial,
     getAnchors, hillfill, optimizeSynergy,
     harvestSchedule, cycleText, simulate,
+    encodeAisen, AISEN_CROP, AISEN_FERT,
   };
 });

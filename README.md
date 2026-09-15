@@ -45,6 +45,12 @@ and footprint) with their yield comparison. A stats area shows income, **total
 produced per day** (whole-plot items/day), per-class fertilizer use, buff
 coverage, and **Yield per day** broken down per crop.
 
+**Share to Aisen.** A **Copy Aisen link** button encodes the current layout into
+Aisen's Palia Garden Planner v0.5 save code and copies a
+`https://palia-garden-planner.vercel.app/?layout=<code>` URL. Opening the link
+loads the exact layout (crops + per-crop fertilizer assignment) in Aisen's
+planner, so an optimized garden can be shared into the community's standard tool.
+
 ## Architecture & verification
 
 The game logic lives in `src/garden.js` — the single source of truth (UMD: sets
@@ -60,6 +66,10 @@ The tests exercise exactly what the app computes:
   returns both the analytic steady-state yield and a day-by-day simulation that
   accumulates actual harvests, so the two can be cross-checked.
 - **`optimizeSynergy(...)`** — the placement/optimizer, parameterised by options.
+- **`encodeAisen(grid, opts)`** — serializes a 9×9 layout into Aisen's Palia
+  Garden Planner v0.5 save code (crops + per-crop fertilizer), for the **Copy
+  Aisen link** button. A round-trip test in `test/export.test.js` decodes the
+  output with a faithful replica of Aisen's own `expandPlotCode`/plot loader.
 - `CROP` / `SYMS` / etc. — crop data and the yield model (a single source of
   truth for both app and tests).
 
@@ -114,7 +124,7 @@ the apple needs — which the optimizer then corrects by surrounding the apple w
 Harvest providers.
 
 ```sh
-npm test                # 49 tests: type checker, simulator, data, full app
+npm test                # 55 tests: type checker, simulator, data, full app, Aisen export
 npm run verify          # optimizer vs random-valid-layouts harness -> reports/
 ```
 
