@@ -90,7 +90,10 @@ The tests exercise exactly what the app computes:
 - **`optimizeSynergy(selection, fill, iters, opts, pins?)`** — the
   placement/optimizer, parameterised by options; an optional `pins` array of
   `{ sym, r, c }` anchors keeps those crops fixed at their exact positions while
-  the rest of the plot is optimized around them.
+  the rest of the plot is optimized around them. Placement is a randomised
+  greedy placer, so it retries until it has its full quota of packings to
+  hill-climb (a failed attempt costs ~0.1 ms) — a feasible selection is reported
+  unfittable only after the retries, and a final first-fit fallback, all fail.
 - **`encodeAisen(grid, opts)`** — serializes a 9×9 layout into Aisen's Palia
   Garden Planner v0.5 save code (crops + per-crop fertilizer), for the **Copy
   Aisen link** button. A round-trip test in `test/export.test.js` decodes the

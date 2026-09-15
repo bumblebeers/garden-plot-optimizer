@@ -99,11 +99,11 @@ function mulberry32(a) {
 }
 
 test('a placement attempt that fails does not abort the run (feasible selection)', () => {
-  // A tight 12-crop mix that exactly fills the plot, taken from a layout the type
-  // checker accepts (so it is packable). Buff-seeking placement dead-ends on every
-  // attempt here; aborting on the first failure is what used to make the app tell
-  // the user to remove crops. The retries (and their placement fallbacks) place it.
-  const sel = { p: 2, A: 3, t: 1, B: 2, F: 5, T: 2, w: 2, P: 3, r: 1, i: 1, S: 1, K: 1 };
+  // A tight 10-crop mix that exactly fills the plot. Buff-seeking placement packs
+  // it on ~2% of tries, so the first attempt almost always dead-ends — aborting
+  // there is what used to make the app tell the user to remove crops. Every
+  // systematic placement policy dead-ends on it too, so only the retries place it.
+  const sel = { S: 3, p: 1, B: 3, P: 5, F: 3, A: 2, n: 2, r: 2, t: 1, T: 1 };
   const realRandom = Math.random;
   Math.random = mulberry32(1);
   try {

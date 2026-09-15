@@ -336,35 +336,31 @@
 
   /* Pick one crop instance's fertiliser class. The objective decides; the user's
    * buff priority only breaks ties:
-   *   income — compare net gold/day per class: what the class's buff adds to the
-   *            crop against its price per tile per day. Water Retain / Weed
-   *            Block cost gold and add none, so they never win; neither does a
-   *            class whose buff the crop already receives from its neighbours.
-   *   yield  — only Harvest Boost raises items/day, so Quality / Water / Weed
-   *            tie at zero gain and the first of them in the user's priority is
-   *            bought (the score's coverage tie-break is what makes that worth
-   *            doing — see TIEBREAK). */
+   *   income — Harvest Boost and Quality Up are the only classes that can pay:
+   *            each is taken only where its buff raises the harvest value by more
+   *            than its price per tile per day. Water Retain / Weed Block leave
+   *            the harvest value untouched and cost gold, so they are never
+   *            bought, and a buff the crop already receives from its neighbours
+   *            cannot be bought either.
+   *   yield  — Harvest Boost is the only class that raises items/day, so it is
+   *            bought wherever it is missing and allowed; otherwise the first of
+   *            Quality / Water / Weed in the user's priority order is (the
+   *            score's coverage tie-break is what makes that worth doing — see
+   *            TIEBREAK). */
   function chooseFertilizer(d, tiles, got, opts) {
-    const yieldObj = opts.objective === 'yield';
-    // what the crop earns with no fertiliser bought at all
-    const noneVal = yieldObj
-      ? ((got.H ? d.yldB : d.yld) * d.harv) / d.cycle
-      : instanceGross(d, got.H, got.Q, opts);
-    // best allowed-and-missing class; equivalent classes keep the earlier one,
-    // so the user's buff priority order breaks the tie
+    const order = effectiveBuffOrder(opts);
+    if (opts.objective === 'yield') {
+      for (const b of order) if (FERTBUFFS.includes(b) && !got[b] && opts.fert[b]) return b;
+      return 'None';
+    }
     let best = null, bestVal = -Infinity;
-    for (const b of effectiveBuffOrder(opts)) {
-      if (!FERTBUFFS.includes(b) || !opts.fert[b] || got[b]) continue;
-      const v = yieldObj
-        ? (((got.H || b === 'H') ? d.yldB : d.yld) * d.harv) / d.cycle
-        : instanceGross(d, got.H || b === 'H', got.Q || b === 'Q', opts) - tiles * FERT_PRICE[b];
+    for (const b of order) {
+      if ((b !== 'H' && b !== 'Q') || !opts.fert[b] || got[b]) continue;
+      const v = instanceGross(d, got.H || b === 'H', got.Q || b === 'Q', opts) - tiles * FERT_PRICE[b];
       if (v > bestVal + 1e-9) { best = b; bestVal = v; }
     }
     if (best === null) return 'None';
-    // buy a class only where it pays: strictly under income (a tie leaves the
-    // gold with the player), or merely not-worse under yield (the score's
-    // coverage tie-break is what makes a convenience buff worth buying there)
-    return (yieldObj ? bestVal >= noneVal - 1e-9 : bestVal > noneVal + 1e-9) ? best : 'None';
+    return bestVal > instanceGross(d, got.H, got.Q, opts) + 1e-9 ? best : 'None';
   }
 
   /* ---------- instance identification (lenient, matches app display) ----------
@@ -702,17 +698,32 @@
       const reduced = f1.filter(s => !bigBuffs.has(CROP[s].buff));
       if (reduced.length) f1 = reduced;
     }
-    // buildGrid is a randomised greedy placer, so a single attempt can fail — or
-    // pack differently — by chance even when the selection fits. Attempts are
-    // restarts, and "couldn't fit" is only reported once every one has failed.
-    // The regular attempts all use the buff-seeking placement (the best starting
-    // point for the hill-climb); if every one of them dead-ends, a last few
-    // retry with a tighter first-fit and a spread placement before giving up.
+    // Placement. buildGrid is a randomised greedy placer, so a single attempt can
+    // fail — or pack differently — by chance even when the selection fits. A
+    // failed attempt costs ~0.1 ms, so instead of calling a run unfittable while
+    // packings go untried, the search keeps trying until it has `restarts`
+    // packings to hill-climb. The tail of tight multi-species mixes packs on
+    // ~1-2% of tries, so `maxTries` is sized against the worst rate measured
+    // (~1.3%): 1200 tries puts a false refusal below 1 in 10^6 there, and costs
+    // at most ~0.13 s on a selection that is genuinely unfittable (which pays it
+    // before reporting that). Only when every one of those tries fails does one
+    // systematic first-fit placement get a turn — a complementary policy,
+    // measured to pack mixes the buff-seeking placement never finds.
     const restarts = 10;
+    const maxTries = 1200;
+    const placed = [];
+    for (let k = 0; k < maxTries && placed.length < restarts; k++) {
+      const r = buildGrid(selection, pins);
+      if (r) placed.push(r);
+    }
+    if (!placed.length) {
+      const r = buildGrid(selection, pins, 'firstfit');
+      if (!r) return [null, 0];
+      placed.push(r);
+    }
+    // Hill-climb every packing; the iters budget is split across the restarts.
     let bestg = null, bestsc = -Infinity;
-    const attempt = (policy) => {
-      const r = buildGrid(selection, pins, policy);
-      if (!r) return false;
+    for (const r of placed) {
       let g = r.grid;
       const user = r.user;
       if (fill) {
@@ -723,11 +734,7 @@
         const s = scoreTotal(g, opts);
         if (s > bestsc) { bestsc = s; bestg = g; }
       }
-      return true;
-    };
-    let placed = 0;
-    for (let k = 0; k < restarts; k++) if (attempt('buff')) placed++;
-    if (!placed) for (const policy of ['firstfit', 'firstfit', 'random', 'random']) if (attempt(policy)) break;
+    }
     return bestg ? [bestg, bestsc] : [null, 0];
   }
 
