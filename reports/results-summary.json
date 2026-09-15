@@ -2,8 +2,8 @@
   {
     "name": "5 carrots (no fert)",
     "objective": "income",
-    "claimed": 3435.2229166666666,
-    "score": 3625.889583333333,
+    "claimed": 3422.527083333334,
+    "score": 3657.8604166666673,
     "simMatch": true,
     "valid": true,
     "random": {
@@ -20,8 +20,8 @@
   {
     "name": "5 carrots (default fert)",
     "objective": "income",
-    "claimed": 3813.4770833333328,
-    "score": 4051.4770833333328,
+    "claimed": 3792.0645833333315,
+    "score": 4031.397916666665,
     "simMatch": true,
     "valid": true,
     "random": {
@@ -38,8 +38,8 @@
   {
     "name": "apple + 2 beans + pumpkin",
     "objective": "income",
-    "claimed": 3691.9874999999993,
-    "score": 3881.9874999999993,
+    "claimed": 3734.4166666666656,
+    "score": 3920.4166666666656,
     "simMatch": true,
     "valid": true,
     "random": {
@@ -56,8 +56,8 @@
   {
     "name": "4 blueberries + 4 peppers",
     "objective": "income",
-    "claimed": 3626.286111111112,
-    "score": 3792.286111111112,
+    "claimed": 3666.3861111111114,
+    "score": 3835.052777777778,
     "simMatch": true,
     "valid": true,
     "random": {
@@ -74,8 +74,8 @@
   {
     "name": "prefer big 2x2 (blueberry/pepper)",
     "objective": "income",
-    "claimed": 3574.1583333333338,
-    "score": 3746.1583333333338,
+    "claimed": 3615.9500000000003,
+    "score": 3776.616666666667,
     "simMatch": true,
     "valid": true,
     "random": {
@@ -92,8 +92,8 @@
   {
     "name": "custom buff order (income)",
     "objective": "income",
-    "claimed": 3648.914583333331,
-    "score": 3888.2479166666644,
+    "claimed": 3667.9229166666637,
+    "score": 3905.9229166666637,
     "simMatch": true,
     "valid": true,
     "random": {
@@ -110,8 +110,8 @@
   {
     "name": "no fertilizer allowed",
     "objective": "income",
-    "claimed": 3324.360416666667,
-    "score": 3481.6937500000004,
+    "claimed": 3362.0347222222235,
+    "score": 3556.70138888889,
     "simMatch": true,
     "valid": true,
     "random": {
@@ -128,8 +128,8 @@
   {
     "name": "yield objective - max crops per day",
     "objective": "yield",
-    "claimed": 75.25000000000001,
-    "score": 85.00333333333336,
+    "claimed": 75.40000000000002,
+    "score": 85.26666666666668,
     "simMatch": true,
     "valid": true,
     "random": {

@@ -65,9 +65,11 @@ no settings leaves the recipient's Preferences untouched.
 
 **Pin crops.** A **Pin mode** toggle (or the 📌 button in a tile's detail card)
 locks a crop at its exact position. When you then hit **Optimize**, pinned crops
-never move — the optimizer fills and hill-climbs the rest of the plot around them.
-Unpin crops (individually or all) and regenerate to let the freed crops move to a
-more optimal spot while the still-pinned ones keep their locations.
+never move — the optimizer fills and anneals the rest of the plot around them.
+The unpinned crops you selected are part of the search too (relocated, never
+deleted — the selection is a bill of materials), so unpin crops (individually or
+all) and regenerate to let the freed crops move to a more optimal spot while the
+still-pinned ones keep their locations.
 
 **Share to Aisen.** A **Copy Aisen link** button encodes the current layout into
 Aisen's Palia Garden Planner v0.5 save code and copies a
@@ -92,10 +94,13 @@ The tests exercise exactly what the app computes:
 - **`optimizeSynergy(selection, fill, iters, opts, pins?)`** — the
   placement/optimizer, parameterised by options; an optional `pins` array of
   `{ sym, r, c }` anchors keeps those crops fixed at their exact positions while
-  the rest of the plot is optimized around them. Placement is a randomised
-  greedy placer, so it retries until it has its full quota of packings to
-  hill-climb (a failed attempt costs ~0.1 ms) — a feasible selection is reported
-  unfittable only after the retries, and a final first-fit fallback, all fail.
+  the rest of the plot is optimized around them. The search is a simulated-
+  annealing hill-climb over a move space that includes the unpinned selected
+  crops (relocatable, never deleted — the selection is a bill of materials);
+  pinned cells never move. Placement is a randomised greedy placer, so it
+  retries until it has its full quota of packings to anneal (a failed attempt
+  costs ~0.1 ms) — a feasible selection is reported unfittable only after the
+  retries, and a final first-fit fallback, all fail.
 - **`encodeAisen(grid, opts)`** — serializes a 9×9 layout into Aisen's Palia
   Garden Planner v0.5 save code (crops + per-crop fertilizer), for the **Copy
   Aisen link** button. A round-trip test in `test/export.test.js` decodes the
@@ -162,7 +167,7 @@ the apple needs — which the optimizer then corrects by surrounding the apple w
 Harvest providers.
 
 ```sh
-npm test                # 71 tests: type checker, simulator, data, full app, Aisen export/import, pins
+npm test                # 78 tests: type checker, simulator, data, full app, Aisen export/import, pins
 npm run verify          # optimizer vs random-valid-layouts harness -> reports/
 ```
 
@@ -181,7 +186,7 @@ charts + raw data to `reports/`.
   don't affect the score — only Harvest Boost raises the item count — so the
   optimizer favours high-count, fast-recycling crops (tomato, bok choy, carrot,
   rice) over high-value ones (apple, potato, corn).
-- Layout generation is a heuristic (randomised placement + hill-climb restarts),
+- Layout generation is a heuristic (randomised placement + annealed restarts),
   so re-running *Optimize* may yield a different but equally good arrangement.
 - Crop data from the official Palia wiki (palia.wiki.gg); the star-chance model is
   the community estimate from Aisen's Palia Garden Planner (the wiki publishes no
